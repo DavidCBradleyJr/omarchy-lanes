@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "davidcbradleyjr.taskbar",
+  "name": "Taskbar",
+  "version": "0.1.0",
+  "author": "David Bradley",
+  "description": "A themed window taskbar for the Omarchy shell: one button per open window, with icons, titles, and pinned launchers.",
+  "homepage": "https://github.com/DavidCBradleyJr/omarchy-taskbar",
+  "kinds": ["panel"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "panel": "Taskbar.qml"
+  }
+}

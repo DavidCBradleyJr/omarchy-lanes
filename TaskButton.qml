@@ -1,0 +1,157 @@
+import QtQuick
+import Quickshell
+import qs.Commons
+
+// One taskbar button: app icon, optional workspace badge, optional title.
+// Colors and states come from the shared Omarchy Style/Color tokens so the
+// button follows whatever theme is active.
+Item {
+  id: root
+
+  property string iconSource: ""
+  property string fallbackGlyph: "?"
+  property string label: ""
+  property string badge: ""
+  property bool active: false
+  property bool urgent: false
+  property bool showLabel: true
+  property bool edgeTop: false
+  property real maxWidth: 220
+  property int barSize: Style.bar.sizeHorizontal
+  property color foreground: Color.bar.text
+  property string fontFamily: Style.font.family
+
+  signal clicked(int button)
+  signal wheel(int delta)
+
+  readonly property bool hovered: mouse.containsMouse
+  readonly property int pad: Style.space(8)
+  readonly property int iconSize: Style.bar.iconCanvas
+  readonly property color textColor: urgent ? Color.bar.active : foreground
+
+  implicitHeight: barSize
+  implicitWidth: showLabel
+    ? Math.min(Style.spaceReal(maxWidth), pad * 2 + content.implicitWidth)
+    : Math.max(barSize, pad * 2 + iconSize)
+
+  Behavior on implicitWidth {
+    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+  }
+
+  Rectangle {
+    anchors.fill: parent
+    anchors.topMargin: Style.space(2)
+    anchors.bottomMargin: Style.space(2)
+    radius: Style.cornerRadius
+    color: mouse.pressed ? Style.pressedFill
+      : root.active ? Style.selectedFill
+      : root.hovered ? Style.hoverFill
+      : "transparent"
+
+    Behavior on color { ColorAnimation { duration: 120 } }
+  }
+
+  // Active/urgent indicator on the edge facing the screen border.
+  Rectangle {
+    width: root.active || root.urgent ? parent.width - root.pad * 2 : 0
+    height: Math.max(2, Style.space(2))
+    radius: height / 2
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.top: root.edgeTop ? parent.top : undefined
+    anchors.bottom: root.edgeTop ? undefined : parent.bottom
+    color: root.urgent ? Color.bar.active : Color.accent
+    opacity: root.active || root.urgent ? 1 : 0
+
+    Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on opacity { NumberAnimation { duration: 120 } }
+  }
+
+  Row {
+    id: content
+    anchors.left: parent.left
+    anchors.leftMargin: root.pad
+    anchors.right: root.showLabel ? parent.right : undefined
+    anchors.rightMargin: root.pad
+    anchors.horizontalCenter: root.showLabel ? undefined : parent.horizontalCenter
+    anchors.verticalCenter: parent.verticalCenter
+    spacing: Style.space(6)
+    clip: true
+
+    Text {
+      visible: root.badge !== ""
+      anchors.verticalCenter: parent.verticalCenter
+      text: root.badge
+      color: root.textColor
+      opacity: 0.5
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      textFormat: Text.PlainText
+    }
+
+    Item {
+      width: root.iconSize
+      height: root.iconSize
+      anchors.verticalCenter: parent.verticalCenter
+
+      Image {
+        id: icon
+        anchors.fill: parent
+        source: root.iconSource
+        sourceSize.width: root.iconSize * 2
+        sourceSize.height: root.iconSize * 2
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        asynchronous: true
+        visible: status === Image.Ready
+        opacity: root.active || root.hovered ? 1 : 0.8
+      }
+
+      // Monogram when the icon theme has nothing for this app.
+      Text {
+        anchors.centerIn: parent
+        visible: icon.status !== Image.Ready
+        text: root.fallbackGlyph
+        color: root.textColor
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.bold: true
+        textFormat: Text.PlainText
+      }
+    }
+
+    Text {
+      id: title
+      visible: root.showLabel && root.label !== ""
+      anchors.verticalCenter: parent.verticalCenter
+      width: Math.min(implicitWidth, Style.spaceReal(root.maxWidth) - root.pad * 2 - root.iconSize - content.spacing
+        - (root.badge !== "" ? badgeMetrics.advanceWidth + content.spacing : 0))
+      text: root.label
+      color: root.textColor
+      opacity: root.active ? 1 : 0.65
+      elide: Text.ElideRight
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.body
+      textFormat: Text.PlainText
+      renderType: Text.NativeRendering
+
+      Behavior on opacity { NumberAnimation { duration: 120 } }
+    }
+  }
+
+  TextMetrics {
+    id: badgeMetrics
+    text: root.badge
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.bodySmall
+  }
+
+  MouseArea {
+    id: mouse
+    anchors.fill: parent
+    hoverEnabled: true
+    acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+    cursorShape: Qt.PointingHandCursor
+    onClicked: function(event) { root.clicked(event.button) }
+    onWheel: function(event) { root.wheel(event.angleDelta.y) }
+  }
+}
