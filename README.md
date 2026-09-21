@@ -1,10 +1,11 @@
-# Omarchy Taskbar
+# Lanes
 
-A window taskbar for the [Omarchy](https://omarchy.org) shell. It runs as a native
+A workspace-first taskbar for the [Omarchy](https://omarchy.org) shell. Windows are
+grouped into lanes by workspace. It runs as a native
 Omarchy shell plugin (Quickshell), so it picks up your theme's colors, font,
 corner rounding and bar sizing and restyles itself when you switch themes.
 
-![Taskbar screenshot](docs/screenshot.png)
+![Lanes screenshot](docs/screenshot.png)
 
 - **Built around workspaces.** In `monitor` or `all` scope, windows are grouped
   by workspace behind a clickable workspace chip, and the current workspace is highlighted
@@ -24,11 +25,11 @@ corner rounding and bar sizing and restyles itself when you switch themes.
 Requires an Omarchy release with the Quickshell-based `omarchy-shell` (tested on Omarchy 4.0.4, Quickshell 0.3.1, Hyprland 0.56).
 
 ```bash
-omarchy plugin add https://github.com/DavidCBradleyJr/omarchy-taskbar.git --enable
+omarchy plugin add https://github.com/DavidCBradleyJr/omarchy-lanes.git --enable
 ```
 
-Update with `omarchy plugin update davidcbradleyjr.taskbar`. Remove with
-`omarchy plugin remove davidcbradleyjr.taskbar`.
+Update with `omarchy plugin update davidcbradleyjr.lanes`. Remove with
+`omarchy plugin remove davidcbradleyjr.lanes`.
 
 ## Configure
 
@@ -38,7 +39,7 @@ Every key is optional:
 ```json
 "plugins": [
   {
-    "id": "davidcbradleyjr.taskbar",
+    "id": "davidcbradleyjr.lanes",
     "position": "bottom",
     "scope": "workspace",
     "align": "left",
@@ -81,16 +82,16 @@ Minimized windows show on the taskbar of the workspace they were minimized from.
 | Ctrl+Alt+B | Show / hide the taskbar |
 
 Omarchy already uses Super+number for workspaces, so the taskbar uses Ctrl+Alt.
-The bindings are in [`hypr/taskbar.lua`](hypr/taskbar.lua):
+The bindings are in [`hypr/lanes.lua`](hypr/lanes.lua):
 
 ```bash
-ln -s ~/.config/omarchy/plugins/davidcbradleyjr.taskbar/hypr/taskbar.lua ~/.config/hypr/taskbar.lua
+ln -s ~/.config/omarchy/plugins/davidcbradleyjr.lanes/hypr/lanes.lua ~/.config/hypr/lanes.lua
 # then in ~/.config/hypr/hyprland.lua, after require("hypr.bindings"):
-#   pcall(require, "hypr.taskbar")
+#   pcall(require, "hypr.lanes")
 ```
 
 Keyboard layouts where AltGr acts as Ctrl+Alt (German, Polish, …) use AltGr+digits for
-characters. On those, edit the modifier in `taskbar.lua`.
+characters. On those, edit the modifier in `lanes.lua`.
 
 ## Minimize convention
 
@@ -102,18 +103,18 @@ uses, so windows minimized by either tool can be restored by the other.
 ## IPC
 
 ```bash
-omarchy-shell shell call davidcbradleyjr.taskbar focusIndex 3
-omarchy-shell shell call davidcbradleyjr.taskbar menu ""
-omarchy-shell shell call davidcbradleyjr.taskbar toggleVisible ""
+omarchy-shell shell call davidcbradleyjr.lanes focusIndex 3
+omarchy-shell shell call davidcbradleyjr.lanes menu ""
+omarchy-shell shell call davidcbradleyjr.lanes toggleVisible ""
 ```
 
 ## Develop
 
 ```bash
-git clone https://github.com/DavidCBradleyJr/omarchy-taskbar.git
-ln -s "$PWD/omarchy-taskbar" ~/.config/omarchy/plugins/davidcbradleyjr.taskbar
+git clone https://github.com/DavidCBradleyJr/omarchy-lanes.git
+ln -s "$PWD/omarchy-lanes" ~/.config/omarchy/plugins/davidcbradleyjr.lanes
 omarchy-shell shell rescanPlugins
-omarchy plugin enable davidcbradleyjr.taskbar
+omarchy plugin enable davidcbradleyjr.lanes
 node tests/model.test.js   # unit tests for the pure logic in TaskbarModel.js
 ```
 
@@ -129,7 +130,7 @@ were already loaded keep their old code. Shell logs:
 | `TaskButton.qml` | A single themed button |
 | `WorkspaceChip.qml` | Workspace group label |
 | `ContextMenu.qml` | Right-click menu (built on Omarchy's `PopupCard`) |
-| `hypr/taskbar.lua` | Keybindings |
+| `hypr/lanes.lua` | Keybindings |
 | `TaskbarModel.js` | Pure logic: settings, filtering, grouping, minimize records, dispatch strings |
 
 ## License

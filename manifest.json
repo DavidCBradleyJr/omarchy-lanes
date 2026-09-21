@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "davidcbradleyjr.taskbar",
-  "name": "Taskbar",
+  "id": "davidcbradleyjr.lanes",
+  "name": "Lanes",
   "version": "0.2.0",
   "author": "David Bradley",
-  "description": "A themed window taskbar for the Omarchy shell: one button per open window, with icons, titles, and pinned launchers.",
-  "homepage": "https://github.com/DavidCBradleyJr/omarchy-taskbar",
+  "description": "A workspace-first taskbar for the Omarchy shell: windows grouped into lanes by workspace, with minimize, a Hyprland action menu, and Ctrl+Alt+N keys.",
+  "homepage": "https://github.com/DavidCBradleyJr/omarchy-lanes",
   "kinds": ["panel"],
   "keepLoaded": true,
   "entryPoints": {

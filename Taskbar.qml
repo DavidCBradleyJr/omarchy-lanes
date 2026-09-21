@@ -6,7 +6,7 @@ import Quickshell.Hyprland
 import qs.Commons
 import "TaskbarModel.js" as Model
 
-// Omarchy shell panel plugin: a window taskbar on every monitor.
+// Lanes: an Omarchy shell panel plugin that puts a window taskbar on every monitor.
 //
 // Mounted at startup (keepLoaded) and stays mounted. Settings are read from
 // this plugin's entry in ~/.config/omarchy/shell.json and hot-reload on save.
@@ -26,7 +26,7 @@ Item {
   readonly property bool grouped: settings.groupByWorkspace && settings.scope !== "workspace"
 
   // ------------------------------------------------------------- IPC
-  //   omarchy-shell shell call davidcbradleyjr.taskbar <method> <arg>
+  //   omarchy-shell shell call davidcbradleyjr.lanes <method> <arg>
   function toggleVisible() { root.hidden = !root.hidden; return root.hidden ? "hidden" : "shown" }
   function showBar() { root.hidden = false }
   function hideBar() { root.hidden = true }
@@ -332,7 +332,7 @@ Item {
         implicitHeight: root.barSize
         color: root.settings.transparent ? "transparent" : Color.bar.background
         surfaceFormat.opaque: false
-        WlrLayershell.namespace: "omarchy-taskbar"
+        WlrLayershell.namespace: "omarchy-lanes"
         WlrLayershell.layer: WlrLayer.Top
         WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 

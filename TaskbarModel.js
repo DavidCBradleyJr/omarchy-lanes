@@ -3,7 +3,7 @@
 // Pure helpers for the taskbar. Nothing here touches QML objects, so the
 // logic can be exercised with plain node (see tests/model.test.js).
 
-var PLUGIN_ID = "davidcbradleyjr.taskbar"
+var PLUGIN_ID = "davidcbradleyjr.lanes"
 
 // Community minimize convention shared with AppDock and the window switcher
 // plugins: minimized windows live on this special workspace, and each one's
