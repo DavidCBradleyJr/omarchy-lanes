@@ -56,12 +56,6 @@ PopupCard {
     if (t) fn(t)
   }
 
-  // The focus grab routes the keyboard here while the menu is open.
-  Item {
-    focus: menu.open
-    Keys.onEscapePressed: menu.open = false
-  }
-
   Column {
     id: column
     width: menu.menuWidth

@@ -334,8 +334,7 @@ Item {
         surfaceFormat.opaque: false
         WlrLayershell.namespace: "omarchy-taskbar"
         WlrLayershell.layer: WlrLayer.Top
-        // Take the keyboard only while the menu is open, so Escape can close it.
-        WlrLayershell.keyboardFocus: contextMenu.open ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
         ContextMenu {
           id: contextMenu

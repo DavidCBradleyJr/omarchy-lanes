@@ -12,7 +12,7 @@ corner rounding and bar sizing and restyles itself when you switch themes.
   dimmed, until you click it again. Uses the community `special:minimized`
   convention, so it interoperates with AppDock and minimize-aware Alt-Tab switchers
 - **Right-click menu:** minimize, floating, pin, fullscreen, move to
-  workspace 1–0, move to the next monitor, close
+  workspace 1–0, move to the next monitor, close. Click outside it to dismiss
 - **Keyboard:** Ctrl+Alt+1…0 acts on the Nth window, Ctrl+Alt+M opens its menu
 - App icons and titles, with the focused window underlined in the theme accent
 - Optional pinned launchers: focus the running app, or launch it
@@ -77,7 +77,7 @@ Minimized windows show on the taskbar of the workspace they were minimized from.
 | Scroll wheel | Cycle focus through the listed windows |
 | Click a workspace chip | Switch to that workspace |
 | Ctrl+Alt+1 … 9, 0 | Same as left-clicking the Nth window on the focused monitor |
-| Ctrl+Alt+M | Window menu for the focused window (Esc closes it) |
+| Ctrl+Alt+M | Toggle the window menu for the focused window |
 | Ctrl+Alt+B | Show / hide the taskbar |
 
 Omarchy already uses Super+number for workspaces, so the taskbar uses Ctrl+Alt.
