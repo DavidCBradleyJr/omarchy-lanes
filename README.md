@@ -70,6 +70,8 @@ Minimized windows show on the taskbar of the workspace they were minimized from.
 
 ## Mouse and keyboard
 
+![Window menu](docs/menu.png)
+
 | | |
 |---|---|
 | Left-click | Focus the window. If it's already focused, minimize it. If it's minimized, restore it |
