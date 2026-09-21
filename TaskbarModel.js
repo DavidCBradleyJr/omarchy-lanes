@@ -394,3 +394,12 @@ function unregisterStrip(strip) {
   if (i !== -1) strips.splice(i, 1)
 }
 function stripList() { return strips.slice() }
+
+// Top-bar widgets, so the panel's IPC can open their popups.
+var widgets = []
+function registerWidget(w) { if (widgets.indexOf(w) === -1) widgets.push(w) }
+function unregisterWidget(w) {
+  var i = widgets.indexOf(w)
+  if (i !== -1) widgets.splice(i, 1)
+}
+function widgetList() { return widgets.slice() }

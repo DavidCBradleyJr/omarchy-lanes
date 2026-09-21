@@ -81,6 +81,7 @@ BarWidget {
     Counter {
       glyph: "✳"
       count: root.waiting
+      filter: "waiting"
       showZero: true
       accent: true
       tooltip: root.waiting === 1 ? "1 agent waiting for you" : root.waiting + " agents waiting for you"
@@ -88,12 +89,14 @@ BarWidget {
     Counter {
       glyph: "◐"
       count: root.working
+      filter: "working"
       showZero: true
       tooltip: root.working === 1 ? "1 agent working" : root.working + " agents working"
     }
     Counter {
       glyph: "󰖰"   // nf-md-window_minimize
       count: root.minimizedCount
+      filter: "minimized"
       tooltip: root.minimizedCount === 1 ? "1 minimized window" : root.minimizedCount + " minimized windows"
     }
   }
@@ -104,6 +107,7 @@ BarWidget {
     property int count: 0
     property bool accent: false
     property bool showZero: false
+    property string filter: ""
     property string tooltip: ""
 
     visible: count > 0 || showZero
@@ -115,7 +119,7 @@ BarWidget {
       anchors.topMargin: Style.space(4)
       anchors.bottomMargin: Style.space(4)
       radius: Style.cornerRadius
-      color: counterMouse.containsMouse || popup.open ? Style.hoverFill : "transparent"
+      color: counterMouse.containsMouse || (popup.open && popup.filter === counter.filter) ? Style.hoverFill : "transparent"
     }
 
     Text {
@@ -138,62 +142,191 @@ BarWidget {
       onExited: if (root.bar) root.bar.hideTooltip(counter)
       onClicked: {
         if (root.bar) root.bar.hideTooltip(counter)
-        popup.anchorItem = summary
-        popup.open = !popup.open
+        popup.anchorItem = counter
+        if (popup.open && popup.filter === counter.filter) {
+          popup.open = false
+        } else {
+          popup.filter = counter.filter
+          popup.open = true
+          popup.anchor.updateAnchor()
+        }
       }
     }
   }
 
   // ------------------------------------------------------------- popup
+  // One list per counter: agents waiting, agents working (model, task, what
+  // it's doing now), or minimized windows. Click a row to go there.
   PopupCard {
     id: popup
+    property string filter: "working"
+
     anchorItem: summary
     bar: root.bar
-    contentWidth: Style.space(320)
-    contentHeight: fittedContentHeight(list.implicitHeight, Style.space(460))
+    contentWidth: Style.space(380)
+    contentHeight: fittedContentHeight(list.implicitHeight, Style.space(520))
 
-    // Agents first (waiting before working), then minimized windows, each in
-    // workspace order.
-    readonly property var rows: {
-      if (!popup.open) return []
-      var windows = core.allWindows()
-      var waiting = [], working = [], minimized = []
-      for (var i = 0; i < windows.length; i++) {
-        var t = windows[i].toplevel
-        var state = core.agentStates[core.addressOf(t)] || ""
-        var row = { toplevel: t, state: state, label: windows[i].groupLabel }
-        if (state === "waiting") waiting.push(row)
-        else if (state === "working") working.push(row)
-        else if (core.isMinimized(t)) minimized.push(row)
-      }
-      return waiting.concat(working).concat(minimized)
+    readonly property var agentRows: popup.open && popup.filter !== "minimized" ? core.agentItemsIn(popup.filter) : []
+    readonly property var minimizedRows: {
+      if (!popup.open || popup.filter !== "minimized") return []
+      var all = Hyprland.toplevels.values
+      return all.filter(function(t) { return core.isMinimized(t) })
     }
+    readonly property int rowCount: popup.filter === "minimized" ? minimizedRows.length : agentRows.length
+    readonly property string heading: popup.filter === "waiting" ? "Waiting for you"
+      : popup.filter === "working" ? "Working" : "Minimized"
 
     Column {
       id: list
       width: parent.width
-      spacing: 0
+      spacing: Style.space(2)
 
       Text {
-        visible: popup.rows.length === 0
         width: parent.width
         height: Style.spacing.popupRowHeight
         verticalAlignment: Text.AlignVCenter
-        text: "No agents or minimized windows"
+        leftPadding: Style.space(6)
+        text: popup.heading + "  \u00B7  " + popup.rowCount
         color: Color.popups.text
         opacity: 0.55
         font.family: Style.font.family
-        font.pixelSize: Style.font.body
+        font.pixelSize: Style.font.bodySmall
+        textFormat: Text.PlainText
       }
 
+      Text {
+        visible: popup.rowCount === 0
+        width: parent.width
+        leftPadding: Style.space(6)
+        bottomPadding: Style.space(6)
+        text: popup.filter === "minimized" ? "Nothing minimized" : "No agents " + (popup.filter === "waiting" ? "waiting" : "working") + " right now"
+        color: Color.popups.text
+        font.family: Style.font.family
+        font.pixelSize: Style.font.body
+        textFormat: Text.PlainText
+      }
+
+      // Agents
       Repeater {
-        model: popup.rows
+        model: popup.agentRows
 
         Item {
-          id: rowItem
+          id: agentRow
           required property var modelData
-          readonly property var toplevel: modelData.toplevel
-          readonly property string appId: core.appIdOf(toplevel)
+          readonly property var toplevel: core.toplevelFor(modelData.address)
+
+          width: list.width
+          height: rowColumn.implicitHeight + Style.space(10)
+
+          Rectangle {
+            anchors.fill: parent
+            radius: Style.cornerRadius
+            color: agentMouse.containsMouse ? Style.hoverFill : "transparent"
+          }
+
+          Image {
+            id: agentIcon
+            x: Style.space(8)
+            y: Style.space(7)
+            width: Style.bar.iconCanvas
+            height: width
+            sourceSize.width: width * 2
+            sourceSize.height: height * 2
+            source: agentRow.toplevel ? core.iconForApp(core.appIdOf(agentRow.toplevel)) : ""
+            fillMode: Image.PreserveAspectFit
+            asynchronous: true
+          }
+
+          Column {
+            id: rowColumn
+            anchors.left: agentIcon.right
+            anchors.leftMargin: Style.space(10)
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            y: Style.space(5)
+            spacing: Style.space(2)
+
+            // Task title, with the state glyph
+            Text {
+              width: parent.width
+              text: (agentRow.modelData.state === "waiting" ? "\u2733  " : "\u25D0  ") + agentRow.modelData.title
+              elide: Text.ElideRight
+              color: agentRow.modelData.state === "waiting" ? Color.accent : Color.popups.text
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              textFormat: Text.PlainText
+            }
+
+            // App and model
+            Row {
+              spacing: Style.space(6)
+
+              Text {
+                text: agentRow.modelData.app
+                color: Color.popups.text
+                opacity: 0.55
+                font.family: Style.font.family
+                font.pixelSize: Style.font.bodySmall
+                textFormat: Text.PlainText
+              }
+
+              Rectangle {
+                visible: agentRow.modelData.model !== ""
+                width: modelText.implicitWidth + Style.space(10)
+                height: modelText.implicitHeight + Style.space(2)
+                radius: Style.cornerRadius
+                color: Style.selectedFill
+                anchors.verticalCenter: parent.verticalCenter
+
+                Text {
+                  id: modelText
+                  anchors.centerIn: parent
+                  text: agentRow.modelData.model
+                  color: Color.popups.text
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                  textFormat: Text.PlainText
+                }
+              }
+            }
+
+            // What it's doing now
+            Text {
+              visible: agentRow.modelData.activity !== ""
+              width: parent.width
+              text: agentRow.modelData.activity
+              elide: Text.ElideRight
+              maximumLineCount: 2
+              wrapMode: Text.Wrap
+              color: Color.popups.text
+              opacity: 0.7
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              textFormat: Text.PlainText
+            }
+          }
+
+          MouseArea {
+            id: agentMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+              popup.open = false
+              core.openAgent(agentRow.modelData)
+            }
+          }
+        }
+      }
+
+      // Minimized windows
+      Repeater {
+        model: popup.minimizedRows
+
+        Item {
+          id: minRow
+          required property var modelData
+          readonly property string appId: core.appIdOf(modelData)
 
           width: list.width
           height: Style.spacing.popupRowHeight
@@ -201,44 +334,29 @@ BarWidget {
           Rectangle {
             anchors.fill: parent
             radius: Style.cornerRadius
-            color: rowMouse.containsMouse ? Style.hoverFill : "transparent"
-          }
-
-          Text {
-            id: stateGlyph
-            x: Style.space(6)
-            width: Style.space(16)
-            anchors.verticalCenter: parent.verticalCenter
-            text: rowItem.modelData.state === "waiting" ? "✳"
-              : rowItem.modelData.state === "working" ? "◐" : "󰖰"
-            color: rowItem.modelData.state === "waiting" ? Color.accent : Color.popups.text
-            opacity: rowItem.modelData.state === "" ? 0.55 : 1
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
-            textFormat: Text.PlainText
+            color: minMouse.containsMouse ? Style.hoverFill : "transparent"
           }
 
           Image {
-            id: rowIcon
-            anchors.left: stateGlyph.right
-            anchors.leftMargin: Style.space(4)
+            id: minIcon
+            x: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
             width: Style.bar.iconCanvas
             height: width
             sourceSize.width: width * 2
             sourceSize.height: height * 2
-            source: core.iconForApp(rowItem.appId)
+            source: core.iconForApp(minRow.appId)
             fillMode: Image.PreserveAspectFit
             asynchronous: true
           }
 
           Text {
-            anchors.left: rowIcon.right
-            anchors.leftMargin: Style.space(8)
-            anchors.right: wsLabel.left
+            anchors.left: minIcon.right
+            anchors.leftMargin: Style.space(10)
+            anchors.right: parent.right
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
-            text: Model.agentLabel(rowItem.toplevel.title || rowItem.appId)
+            text: Model.agentLabel(minRow.modelData.title || minRow.appId)
             elide: Text.ElideRight
             color: Color.popups.text
             font.family: Style.font.family
@@ -246,31 +364,30 @@ BarWidget {
             textFormat: Text.PlainText
           }
 
-          Text {
-            id: wsLabel
-            anchors.right: parent.right
-            anchors.rightMargin: Style.space(8)
-            anchors.verticalCenter: parent.verticalCenter
-            text: rowItem.modelData.label
-            color: Color.popups.text
-            opacity: 0.55
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            textFormat: Text.PlainText
-          }
-
           MouseArea {
-            id: rowMouse
+            id: minMouse
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: {
               popup.open = false
-              core.activate(rowItem.toplevel)
+              core.restore(minRow.modelData)
             }
           }
         }
       }
     }
+  }
+
+  // Keyboard / script access: omarchy-shell shell call davidcbradleyjr.lanes agents working
+  Component.onCompleted: Model.registerWidget(root)
+  Component.onDestruction: Model.unregisterWidget(root)
+
+  function showList(filter) {
+    popup.filter = filter || "working"
+    popup.anchorItem = summary
+    popup.open = !popup.open
+    popup.anchor.updateAnchor()
+    return popup.open
   }
 }

@@ -34,7 +34,8 @@ Requires an Omarchy release with the Quickshell-based `omarchy-shell` (tested on
 Omarchy 4.0.4, Quickshell 0.3.1, Hyprland 0.56 with the Lua dispatcher API).
 
 No external dependencies. Pinned launchers start apps with `uwsm-app` and
-`gtk-launch`, which ship with Omarchy.
+`gtk-launch`, and the agent helper uses `python3` and `hyprctl`. All of these ship
+with Omarchy.
 
 ```bash
 omarchy plugin add https://github.com/DavidCBradleyJr/omarchy-lanes.git --enable
@@ -140,21 +141,43 @@ characters. On those, edit the modifier in `lanes.lua`.
 
 ## Agents
 
-Claude Code writes its state into the terminal title: `✳ …` while it waits for
-input, a spinning `◐◓◑◒ …` while it works. Lanes reads that, so there's nothing to
-set up. It works in any terminal and on any workspace, with no hooks, tmux, or herdr.
+Lanes tracks coding agents from two sources:
 
-- A **spinner** on a window's icon means its agent is working. A **pulsing dot**
-  means it's waiting for you. The workspace chip gets a dot too, so you can see
+- **Window titles.** Claude Code writes its state into the terminal title: `✳ …`
+  while it waits for input, a spinning `◐◓◑◒ …` while it works. This works instantly,
+  in any terminal, with no setup.
+- **Session logs.** A small helper, [`bin/lanes-agents`](bin/lanes-agents), reads the
+  ends of the Codex and Claude Code session logs every few seconds. It finds the model,
+  the task title, what the agent is doing right now, and which window it runs in.
+  It's also how Lanes sees the **Codex app**, whose window title never changes.
+
+| Agent | Log it reads | What you get |
+|---|---|---|
+| Codex app and Codex CLI | `~/.codex/sessions/**/rollout-*.jsonl`, `~/.codex/session_index.jsonl` | working / finished, model, thread name, current step, and a `codex://threads/…` link that reopens the thread |
+| Claude Code | `~/.claude/projects/<dir>/<session>.jsonl` | model, session title, last tool or reply |
+
+The helper only reads; it never writes to an agent's files. It writes its snapshot to
+`$XDG_RUNTIME_DIR/omarchy-lanes/agents.json` and stops when the shell exits. It needs
+`python3`, which Omarchy already depends on. Test it with `bin/lanes-agents --once`.
+
+On the taskbar:
+
+- A **spinner** on a window's icon means an agent there is working. A **pulsing dot**
+  means one is waiting for you. The workspace chip gets a dot too, so you can see
   "workspace 6 needs me" without looking at the windows
-- When an agent goes from working to waiting and its window isn't focused, you get a
-  desktop notification
-- The top-bar widget counts agents waiting (`✳`) and working (`◐`); click it for a
-  list, click a row to go there. Ctrl+Alt+A cycles through waiting agents
+- When an agent finishes and you aren't looking at its window, you get a desktop
+  notification
+- In the top bar, `✳` counts agents waiting for you and `◐` counts agents working.
+  Click either one for a list showing each agent's app, model, task and current step.
+  Click a row to jump there: the Codex app opens that exact thread, and a terminal
+  gets focus (restored first if it was minimized). Ctrl+Alt+A cycles through
+  waiting agents
+
+A Codex turn counts as "waiting" for 15 minutes after it finishes, then drops off the
+counters.
 
 For agents that mark their titles differently, add patterns, e.g.
-`"agentWaitingPattern": "^\\[waiting\\]"`. Lanes only knows what the title says, so an
-agent that doesn't set its title can't be detected.
+`"agentWaitingPattern": "^\\[waiting\\]"`.
 
 ## Top bar
 
@@ -185,6 +208,7 @@ uses, so windows minimized by either tool can be restored by the other.
 omarchy-shell shell call davidcbradleyjr.lanes focusIndex 3
 omarchy-shell shell call davidcbradleyjr.lanes menu ""
 omarchy-shell shell call davidcbradleyjr.lanes nextAgent ""
+omarchy-shell shell call davidcbradleyjr.lanes agents working   # or waiting, minimized
 omarchy-shell shell call davidcbradleyjr.lanes toggleAutoHide ""
 omarchy-shell shell call davidcbradleyjr.lanes toggleVisible ""
 ```
@@ -197,7 +221,8 @@ Work from your own checkout of this repository, linked in as the plugin:
 ln -s /path/to/your/checkout ~/.config/omarchy/plugins/davidcbradleyjr.lanes
 omarchy-shell shell rescanPlugins
 omarchy plugin enable davidcbradleyjr.lanes
-node tests/model.test.js   # unit tests for the pure logic in TaskbarModel.js
+node tests/model.test.js    # pure logic in TaskbarModel.js
+python3 tests/test_agents.py  # the agent helper
 ```
 
 After editing an already-loaded plugin, run `omarchy restart shell`. The shell's
@@ -212,6 +237,7 @@ were already loaded keep their old code. Shell logs:
 | `BarWidget.qml` | Top-bar widget: summary counters and popup, or inline lanes |
 | `Actions.qml` | Shared core: settings, window list, agents, minimize, actions |
 | `LaneStrip.qml` | The lanes strip, used by the bottom bar and inline mode |
+| `bin/lanes-agents` | Agent helper: Codex / Claude Code sessions from their logs |
 | `TaskButton.qml` | A single themed button |
 | `WorkspaceChip.qml` | Workspace group label |
 | `ContextMenu.qml` | Right-click menu (built on Omarchy's `PopupCard`) |

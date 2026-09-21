@@ -59,6 +59,18 @@ Item {
   // Ctrl+Alt+A: jump to the next agent waiting for input.
   function nextAgent() { return core.focusNextWaiting() ? "ok" : "none" }
 
+  // Toggle the top-bar widget's agent list: "working", "waiting" or
+  // "minimized". Opens on the focused monitor's widget.
+  function agents(filter) {
+    var monitor = Hyprland.focusedMonitor
+    var list = Model.widgetList()
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].visible && list[i].mode === "summary" && (!monitor || list[i].screenMonitor === monitor))
+        return list[i].showList(filter || "working") ? "open" : "closed"
+    }
+    return "none"
+  }
+
   // Ctrl+Alt+M: toggle the window menu for the focused window, on whichever
   // strip (bottom bar or top-bar lanes) shows it on the focused monitor.
   function menu() {

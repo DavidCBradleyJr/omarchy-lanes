@@ -4,7 +4,7 @@
   "name": "Lanes",
   "version": "0.3.0",
   "author": "David Bradley",
-  "description": "A workspace-first taskbar for the Omarchy shell: windows grouped into lanes by workspace, agent badges for Claude Code and friends, minimize, a Hyprland window menu, and an optional top-bar widget.",
+  "description": "A workspace-first taskbar for the Omarchy shell: windows grouped into lanes by workspace, live Codex and Claude Code agent status (model, task, one click to jump there), minimize, a Hyprland window menu, and an optional top-bar widget.",
   "homepage": "https://github.com/DavidCBradleyJr/omarchy-lanes",
   "kinds": [
     "panel",

@@ -13,7 +13,8 @@ Item {
 
   property string pluginId: Model.PLUGIN_ID
   property var shell: null
-  // Only one instance (the bottom bar's) posts agent notifications.
+  // One instance (the bottom bar's) runs the agent helper and posts
+  // notifications; every instance reads the helper's snapshot.
   property bool notifyAgents: false
 
   property var settings: Model.normalizeSettings(null)
@@ -53,10 +54,7 @@ Item {
 
   Component.onCompleted: {
     Quickshell.execDetached(["mkdir", "-p", actions.minimizerDir])
-    // Seed the agent map without notifying: agents already waiting at
-    // startup didn't just finish.
-    actions.syncAgentStates()
-    actions.previousAgentStates = actions.agentStates
+    actions.syncAgentItems()
   }
 
   FileView {
@@ -103,7 +101,8 @@ Item {
   // Reads the title, so call it from per-button bindings, not from anything
   // that rebuilds a list: agent spinners change titles several times a second.
   function agentStateOf(t) {
-    return t && actions.settings.agents ? Model.agentState(t.title, actions.settings) : ""
+    if (!t || !actions.settings.agents) return ""
+    return Model.agentState(t.title, actions.settings) || actions.agentStates[actions.addressOf(t)] || ""
   }
 
   function describe(t) {
@@ -150,10 +149,58 @@ Item {
   function allWindows() { return actions.windowsFor(null, "all") }
 
   // ------------------------------------------------------------- agents
-  // Address -> agent state for every window. The raw map re-evaluates on
-  // every title change (spinner frames included); agentStates only changes
-  // when some agent's state really does, so chips and popups stay put.
-  readonly property var rawAgentStates: {
+  // Two sources, merged per window:
+  //   titles  Claude Code puts ✳ / a spinner in its terminal title. Instant,
+  //           no setup, but says nothing about model or task.
+  //   helper  bin/lanes-agents reads the tails of Codex and Claude Code
+  //           session logs every few seconds: state, model, task title,
+  //           current step, and which window runs it. This is what sees the
+  //           Codex app, whose window title never changes.
+
+  readonly property string helperPath: String(Qt.resolvedUrl("bin/lanes-agents")).replace(/^file:\/\//, "")
+  readonly property string snapshotPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/omarchy-lanes/agents.json"
+  property var sessions: []
+
+  Process {
+    id: helper
+    command: ["python3", actions.helperPath]
+    running: actions.notifyAgents && actions.settings.agents
+    onExited: if (actions.notifyAgents && actions.settings.agents) helperRestart.restart()
+  }
+
+  // If the helper dies (a Python error, say), try again later rather than
+  // spinning.
+  Timer { id: helperRestart; interval: 30000; onTriggered: helper.running = actions.notifyAgents && actions.settings.agents }
+
+  // The helper replaces the file atomically (write + rename), which a file
+  // watch can't follow, and the file may not exist yet at startup. It's a
+  // few hundred bytes, so just re-read it on the helper's own cadence.
+  FileView {
+    id: snapshotFile
+    path: actions.snapshotPath
+    printErrors: false
+    onLoaded: {
+      try {
+        var parsed = JSON.parse(text() || "{}")
+        actions.sessions = Array.isArray(parsed.sessions) ? parsed.sessions : []
+      } catch (e) {
+        actions.sessions = []
+      }
+    }
+    onLoadFailed: actions.sessions = []
+  }
+
+  Timer {
+    interval: 2000
+    repeat: true
+    running: actions.settings.agents
+    triggeredOnStart: true
+    onTriggered: snapshotFile.reload()
+  }
+
+  // Title-derived state per window. Re-evaluates on every title change
+  // (spinner frames included), so nothing heavy hangs off it directly.
+  readonly property var titleStates: {
     var out = ({})
     if (!actions.settings.agents) return out
     var all = Hyprland.toplevels.values
@@ -164,51 +211,114 @@ Item {
     return out
   }
 
-  property var agentStates: ({})
-  property string agentStatesKey: ""
-
-  function syncAgentStates() {
-    var key = JSON.stringify(actions.rawAgentStates)
-    if (key === actions.agentStatesKey) return
-    actions.agentStatesKey = key
-    actions.agentStates = actions.rawAgentStates
-  }
-
-  onRawAgentStatesChanged: syncAgentStates()
-
-  readonly property var agentTotals: {
-    var list = []
-    for (var addr in actions.agentStates) list.push(actions.agentStates[addr])
-    return Model.agentCounts(list)
-  }
-
-  property var previousAgentStates: ({})
-
-  onAgentStatesChanged: {
-    var finished = Model.finishedAgents(actions.previousAgentStates, actions.agentStates)
-    actions.previousAgentStates = actions.agentStates
-    if (!actions.notifyAgents || !actions.settings.agentNotify) return
+  // One entry per agent: helper sessions first, then title-detected windows
+  // the helper didn't account for (other agents, or no helper running).
+  //   { key, state, app, title, model, activity, address, link }
+  readonly property var rawAgentItems: {
+    var items = []
+    if (!actions.settings.agents) return items
+    var covered = ({})
+    for (var i = 0; i < actions.sessions.length; i++) {
+      var s = actions.sessions[i]
+      if (s.state !== "working" && s.state !== "waiting") continue
+      var addr = Model.normalizeAddress(s.address)
+      // For a terminal, the live title beats the helper's 3-second-old read.
+      var state = s.agent === "claude" && actions.titleStates[addr] ? actions.titleStates[addr] : s.state
+      items.push({ key: s.agent + ":" + s.id, state: state, app: s.app || s.agent, title: s.title || "",
+        model: s.model || "", activity: s.activity || "", address: addr, link: s.link || "" })
+      if (addr && s.agent !== "codex") covered[addr] = true
+    }
     var all = Hyprland.toplevels.values
-    for (var i = 0; i < finished.length; i++) {
-      for (var j = 0; j < all.length; j++) {
-        var t = all[j]
-        if (actions.addressOf(t) !== finished[i] || actions.isActive(t)) continue
-        var where = t.workspace ? "workspace " + Model.workspaceLabel(t.workspace.id) : ""
-        Quickshell.execDetached(["notify-send", "-a", "Lanes", "-i", "dialog-information",
-          "Agent waiting for you", Model.agentLabel(t.title) + (where ? "  ·  " + where : "")])
-      }
+    for (var j = 0; j < all.length; j++) {
+      var a = actions.addressOf(all[j])
+      var ts = actions.titleStates[a]
+      if (!ts || covered[a]) continue
+      items.push({ key: "window:" + a, state: ts, app: actions.appIdOf(all[j]), title: Model.agentLabel(all[j].title),
+        model: "", activity: "", address: a, link: "" })
+    }
+    return items
+  }
+
+  // Published only when something other than spinner frames changed.
+  property var agentItems: []
+  property string agentItemsKey: ""
+
+  function syncAgentItems() {
+    var key = JSON.stringify(actions.rawAgentItems)
+    if (key === actions.agentItemsKey) return
+    actions.agentItemsKey = key
+    actions.agentItems = actions.rawAgentItems
+  }
+
+  onRawAgentItemsChanged: syncAgentItems()
+
+  // Address -> "waiting" / "working" for badges and chips. Waiting wins: a
+  // window with one agent waiting on you needs you, whatever else runs there.
+  readonly property var agentStates: {
+    var out = ({})
+    for (var i = 0; i < actions.agentItems.length; i++) {
+      var it = actions.agentItems[i]
+      if (!it.address) continue
+      if (it.state === "waiting" || !out[it.address]) out[it.address] = it.state
+    }
+    return out
+  }
+
+  readonly property var agentTotals: Model.agentCounts(actions.agentItems.map(function(it) { return it.state }))
+
+  function agentItemsIn(state) {
+    return actions.agentItems.filter(function(it) { return it.state === state })
+  }
+
+  property var previousAgentItems: ({})
+
+  onAgentItemsChanged: {
+    var current = ({})
+    for (var i = 0; i < actions.agentItems.length; i++) current[actions.agentItems[i].key] = actions.agentItems[i].state
+    var finished = Model.finishedAgents(actions.previousAgentItems, current)
+    actions.previousAgentItems = current
+    if (!actions.notifyAgents || !actions.settings.agentNotify) return
+    for (var j = 0; j < finished.length; j++) {
+      var item = actions.agentItems.filter(function(it) { return it.key === finished[j] })[0]
+      if (!item) continue
+      var t = actions.toplevelFor(item.address)
+      // Looking at it already: no need to announce.
+      if (t && actions.isActive(t)) continue
+      var where = t && t.workspace ? "workspace " + Model.workspaceLabel(t.workspace.id) : ""
+      Quickshell.execDetached(["notify-send", "-a", "Lanes", "-i", "dialog-information",
+        "Agent waiting for you", item.title + "  ·  " + item.app + (where ? "  ·  " + where : "")])
     }
   }
 
-  // Focus the next agent that's waiting for input, in workspace order.
+  function toplevelFor(address) {
+    var addr = Model.normalizeAddress(address)
+    if (!addr) return null
+    var all = Hyprland.toplevels.values
+    for (var i = 0; i < all.length; i++) if (actions.addressOf(all[i]) === addr) return all[i]
+    return null
+  }
+
+  // Jump to an agent: open its deep link (the Codex app switches to that
+  // thread), then focus or restore its window.
+  function openAgent(item) {
+    if (!item) return
+    if (item.link) Quickshell.execDetached(["xdg-open", item.link])
+    var t = actions.toplevelFor(item.address)
+    if (t) actions.activate(t)
+  }
+
+  // Focus the next agent that's waiting for input, cycling through them.
   function focusNextWaiting() {
-    var list = actions.allWindows()
-    var states = list.map(function(w) { return actions.agentStates[actions.addressOf(w.toplevel)] || "" })
+    var list = actions.agentItems
+    var states = list.map(function(it) { return it.state })
     var current = -1
-    for (var i = 0; i < list.length; i++) if (actions.isActive(list[i].toplevel)) { current = i; break }
+    for (var i = 0; i < list.length; i++) {
+      var t = actions.toplevelFor(list[i].address)
+      if (t && actions.isActive(t) && list[i].state === "waiting") { current = i; break }
+    }
     var next = Model.nextWaitingIndex(states, current)
     if (next < 0) return false
-    actions.activate(list[next].toplevel)
+    actions.openAgent(list[next])
     return true
   }
 

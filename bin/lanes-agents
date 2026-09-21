@@ -1,0 +1,523 @@
+#!/usr/bin/env python3
+"""Watch local coding-agent sessions for Lanes.
+
+Writes a JSON snapshot of live agent sessions to
+$XDG_RUNTIME_DIR/omarchy-lanes/agents.json every few seconds (only when it
+changes), for the Lanes bar and widget to read. Read-only: it never touches
+agent state, it only reads the tails of their session logs.
+
+  Codex (desktop app and CLI)  ~/.codex/sessions/**/rollout-*.jsonl
+  Claude Code                  ~/.claude/projects/<cwd>/<session>.jsonl
+
+Each session: agent, app, id, state ("working" | "waiting"), model, title,
+activity (what it's doing now), cwd, address (Hyprland window), link
+(deep link to reopen it, when the app has one), updated (epoch seconds).
+
+Runs until its parent (the Omarchy shell) goes away.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+OUT_DIR = os.path.join(RUNTIME, "omarchy-lanes")
+OUT_FILE = os.path.join(OUT_DIR, "agents.json")
+
+CODEX_HOME = os.environ.get("CODEX_HOME") or os.path.join(HOME, ".codex")
+CLAUDE_PROJECTS = os.path.join(HOME, ".claude", "projects")
+
+INTERVAL = 3.0
+# A Codex turn with an open task but no log writes for this long is treated
+# as abandoned (app quit mid-turn). Long tool runs write nothing for a while,
+# so this is generous.
+CODEX_STALE = 20 * 60
+# A finished Codex turn counts as "waiting for you" for this long.
+CODEX_WAITING = 15 * 60
+# Claude Code: how old a session log may be to still be considered.
+CLAUDE_RECENT = 2 * 24 * 3600
+
+TAIL_BYTES = 512 * 1024
+TERMINAL_CLASSES = {"foot", "alacritty", "kitty", "com.mitchellh.ghostty", "ghostty",
+                    "org.wezfurlong.wezterm", "xterm-256color", "konsole"}
+WORKING_RE = re.compile("^[◐-◓⠀-⣿]\\s")
+WAITING_RE = re.compile("^✳\\s")
+
+
+def read_tail(path, size=TAIL_BYTES):
+    """Complete JSON lines from the last `size` bytes of a file."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            end = f.tell()
+            start = max(0, end - size)
+            f.seek(start)
+            data = f.read()
+    except OSError:
+        return []
+    lines = data.split(b"\n")
+    if start > 0:
+        lines = lines[1:]  # first line is probably cut
+    out = []
+    for raw in lines:
+        if not raw.strip():
+            continue
+        try:
+            out.append(json.loads(raw))
+        except ValueError:
+            continue
+    return out
+
+
+def read_first(path):
+    try:
+        with open(path, "rb") as f:
+            return json.loads(f.readline())
+    except (OSError, ValueError):
+        return None
+
+
+def one_line(text, limit=140):
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def strip_glyph(title):
+    t = str(title or "")
+    return re.sub(r"^\S+\s+", "", t) if (WORKING_RE.match(t) or WAITING_RE.match(t)) else t
+
+
+# ---------------------------------------------------------------- processes
+
+def proc_stat(pid):
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            raw = f.read()
+        comm = raw[raw.index("(") + 1: raw.rindex(")")]
+        ppid = int(raw[raw.rindex(")") + 2:].split()[1])
+        return comm, ppid
+    except (OSError, ValueError, IndexError):
+        return None, None
+
+
+def processes():
+    out = {}
+    for name in os.listdir("/proc"):
+        if name.isdigit():
+            comm, ppid = proc_stat(int(name))
+            if comm is not None:
+                out[int(name)] = (comm, ppid)
+    return out
+
+
+def proc_cwd(pid):
+    try:
+        return os.readlink("/proc/%d/cwd" % pid)
+    except OSError:
+        return ""
+
+
+def window_for(pid, procs, client_by_pid):
+    """Nearest ancestor (or self) that owns a Hyprland window."""
+    seen = 0
+    while pid and pid > 1 and seen < 64:
+        if pid in client_by_pid:
+            return client_by_pid[pid]
+        pid = procs.get(pid, (None, 0))[1]
+        seen += 1
+    return None
+
+
+def hypr_clients():
+    try:
+        out = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=3).stdout
+        return json.loads(out or "[]")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+
+
+# ---------------------------------------------------------------- codex
+
+def codex_thread_names():
+    names = {}
+    path = os.path.join(CODEX_HOME, "session_index.jsonl")
+    for entry in read_tail(path, 1024 * 1024):
+        if entry.get("id") and entry.get("thread_name"):
+            names[entry["id"]] = entry["thread_name"]
+    return names
+
+
+def codex_recent_rollouts(now):
+    root = os.path.join(CODEX_HOME, "sessions")
+    found = []
+    # Today's and yesterday's folders cover any session still active.
+    for delta in (0, 86400):
+        day = time.localtime(now - delta)
+        folder = os.path.join(root, "%04d" % day.tm_year, "%02d" % day.tm_mon, "%02d" % day.tm_mday)
+        try:
+            entries = os.scandir(folder)
+        except OSError:
+            continue
+        for e in entries:
+            if e.name.endswith(".jsonl"):
+                try:
+                    mtime = e.stat().st_mtime
+                except OSError:
+                    continue
+                if now - mtime < CODEX_STALE:
+                    found.append((e.path, mtime))
+    return found
+
+
+class CodexLog:
+    """Incremental reader for one rollout log.
+
+    Rollout logs grow to hundreds of MB during a long turn, so the turn's
+    task_started event can be far behind the tail. The first look scans
+    backwards once for the markers it needs; after that only newly appended
+    bytes are read.
+    """
+
+    # Bare names, so a change in the log's JSON spacing can't hide them.
+    MARKERS = (b"task_started", b"task_complete", b"turn_context")
+    CHUNK = 4 * 1024 * 1024
+    MAX_BACKSCAN = 512 * 1024 * 1024
+
+    def __init__(self, path):
+        self.path = path
+        self.offset = 0
+        self.partial = b""
+        self.open_turn = None
+        self.last_complete = None
+        self.model = ""
+        self.activity = ""
+        self.last_user = ""
+        self.meta = read_first(path) or {}
+        self._backscan()
+
+    def _backscan(self):
+        try:
+            size = os.path.getsize(self.path)
+            f = open(self.path, "rb")
+        except OSError:
+            return
+        with f:
+            found_turn = found_model = False
+            pos = size
+            carry = b""
+            scanned = 0
+            lines_for_activity = []
+            while pos > 0 and scanned < self.MAX_BACKSCAN and not (found_turn and found_model):
+                step = min(self.CHUNK, pos)
+                pos -= step
+                f.seek(pos)
+                block = f.read(step) + carry
+                scanned += step
+                parts = block.split(b"\n")
+                carry = parts[0] if pos > 0 else b""
+                body = parts[1:] if pos > 0 else parts
+                for raw in reversed(body):
+                    if not raw.strip():
+                        continue
+                    if len(lines_for_activity) < 400:
+                        lines_for_activity.append(raw)
+                    if not any(m in raw for m in self.MARKERS):
+                        continue
+                    try:
+                        ev = json.loads(raw)
+                    except ValueError:
+                        continue
+                    p = ev.get("payload") or {}
+                    ptype = p.get("type") if isinstance(p, dict) else None
+                    if not found_turn and ptype == "task_started":
+                        self.open_turn = p.get("turn_id") or True
+                        found_turn = True
+                    elif not found_turn and ptype == "task_complete":
+                        self.open_turn = None
+                        self.last_complete = ev.get("timestamp")
+                        found_turn = True
+                    elif not found_model and ev.get("type") == "turn_context" and p.get("model"):
+                        self.model = p["model"]
+                        found_model = True
+            # The newest few hundred lines give the current activity.
+            for raw in reversed(lines_for_activity):
+                try:
+                    self._activity_from(json.loads(raw))
+                except ValueError:
+                    pass
+            # Resume after the last complete line, so an event being written
+            # right now is read whole on the next update.
+            tail_len = min(size, 1024 * 1024)
+            f.seek(size - tail_len)
+            tail = f.read(tail_len)
+            cut = tail.rfind(b"\n")
+            self.offset = size - (len(tail) - cut - 1) if cut != -1 else size
+            self.partial = b""
+
+    def _activity_from(self, ev):
+        kind = ev.get("type")
+        p = ev.get("payload") or {}
+        ptype = p.get("type") if isinstance(p, dict) else None
+        if kind == "event_msg" and ptype == "user_message":
+            self.last_user = p.get("message") or self.last_user
+        elif kind == "response_item" and ptype == "reasoning":
+            summary = p.get("summary") or []
+            if summary and isinstance(summary[0], dict) and summary[0].get("text"):
+                self.activity = summary[0]["text"]
+        elif kind == "response_item" and ptype == "function_call":
+            try:
+                args = json.loads(p.get("arguments") or "{}")
+            except ValueError:
+                args = {}
+            cmd = args.get("cmd") or args.get("command")
+            if isinstance(cmd, list):
+                cmd = " ".join(cmd)
+            if cmd:
+                self.activity = "$ " + str(cmd)
+
+    def update(self):
+        try:
+            size = os.path.getsize(self.path)
+        except OSError:
+            return
+        if size < self.offset:           # rewritten or compacted: start over
+            self.__init__(self.path)
+            return
+        if size == self.offset:
+            return
+        if size - self.offset > 64 * 1024 * 1024:
+            self._backscan()
+            return
+        with open(self.path, "rb") as f:
+            f.seek(self.offset)
+            data = self.partial + f.read(size - self.offset)
+        self.offset = size
+        lines = data.split(b"\n")
+        self.partial = lines.pop()       # incomplete last line, if any
+        for raw in lines:
+            if not raw.strip():
+                continue
+            try:
+                ev = json.loads(raw)
+            except ValueError:
+                continue
+            p = ev.get("payload") or {}
+            ptype = p.get("type") if isinstance(p, dict) else None
+            if ev.get("type") == "turn_context" and p.get("model"):
+                self.model = p["model"]
+            elif ptype == "task_started":
+                self.open_turn = p.get("turn_id") or True
+            elif ptype == "task_complete":
+                self.open_turn = None
+                self.last_complete = ev.get("timestamp")
+            else:
+                self._activity_from(ev)
+
+
+CODEX_LOGS = {}
+
+
+def codex_sessions(now, procs, clients, client_by_pid):
+    names = codex_thread_names()
+    desktop = next((c for c in clients if str(c.get("class", "")).lower() in ("chatgpt", "codex")), None)
+    sessions = []
+    live = set()
+    for path, mtime in codex_recent_rollouts(now):
+        live.add(path)
+        log = CODEX_LOGS.get(path)
+        if log is None:
+            log = CODEX_LOGS[path] = CodexLog(path)
+        else:
+            log.update()
+
+        payload = log.meta.get("payload") or {}
+        sid = payload.get("id") or payload.get("session_id") or ""
+        cwd = payload.get("cwd") or ""
+        originator = str(payload.get("originator") or "")
+
+        if log.open_turn is not None:
+            state = "working"
+        elif log.last_complete and now - mtime < CODEX_WAITING:
+            state = "waiting"
+        else:
+            continue
+
+        # Which window: the desktop app, or the terminal a CLI runs in.
+        address, link, app = "", "", "Codex"
+        if "desktop" in originator.lower() and desktop:
+            address = desktop.get("address", "")
+            link = "codex://threads/" + sid if sid else ""
+            app = "Codex app"
+        else:
+            for pid, (comm, _ppid) in procs.items():
+                if comm == "codex" and proc_cwd(pid) == cwd:
+                    client = window_for(pid, procs, client_by_pid)
+                    if client:
+                        address = client.get("address", "")
+                        break
+            app = "Codex CLI"
+
+        sessions.append({
+            "agent": "codex",
+            "app": app,
+            "id": sid,
+            "state": state,
+            "model": log.model,
+            "title": one_line(names.get(sid) or log.last_user or os.path.basename(cwd) or "Codex", 80),
+            "activity": one_line(log.activity.split("\n")[0] if log.activity else ""),
+            "cwd": cwd,
+            "address": address,
+            "link": link,
+            "updated": int(mtime),
+        })
+    for path in list(CODEX_LOGS):
+        if path not in live:
+            del CODEX_LOGS[path]
+    return sessions
+
+
+# ---------------------------------------------------------------- claude
+
+def claude_project_dir(cwd):
+    return os.path.join(CLAUDE_PROJECTS, re.sub(r"[^A-Za-z0-9]", "-", cwd))
+
+
+def claude_session_info(path):
+    title, model, activity = "", "", ""
+    for ev in read_tail(path, 256 * 1024):
+        kind = ev.get("type")
+        if kind == "ai-title" and ev.get("aiTitle"):
+            title = ev["aiTitle"]
+        elif kind == "custom-title" and ev.get("customTitle"):
+            title = ev["customTitle"]
+        elif kind == "assistant":
+            msg = ev.get("message") or {}
+            if msg.get("model") and not str(msg["model"]).startswith("<"):
+                model = msg["model"]
+            for block in msg.get("content") or []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    inp = block.get("input") or {}
+                    detail = inp.get("description") or inp.get("command") or inp.get("file_path") or inp.get("pattern") or ""
+                    activity = block.get("name", "tool") + (": " + str(detail) if detail else "")
+                elif block.get("type") == "text" and block.get("text"):
+                    activity = block["text"]
+    return title, model, activity
+
+
+def claude_sessions(now, procs, clients, client_by_pid):
+    # One entry per terminal window running claude (the outermost claude
+    # process in that window; tool subprocesses can share the name).
+    by_window = {}
+    for pid, (comm, ppid) in procs.items():
+        if comm != "claude" or procs.get(ppid, ("",))[0] == "claude":
+            continue
+        client = window_for(pid, procs, client_by_pid)
+        if client and client.get("address") not in by_window:
+            by_window[client["address"]] = (pid, client)
+
+    claimed = set()
+    sessions = []
+    for address, (pid, client) in by_window.items():
+        cwd = proc_cwd(pid)
+        folder = claude_project_dir(cwd)
+        try:
+            files = [(e.path, e.stat().st_mtime) for e in os.scandir(folder) if e.name.endswith(".jsonl")]
+        except OSError:
+            files = []
+        files = sorted((f for f in files if now - f[1] < CLAUDE_RECENT), key=lambda f: -f[1])
+
+        window_title = str(client.get("title") or "")
+        wanted = strip_glyph(window_title)
+        chosen = None
+        # Several sessions can share a folder; the window title is the
+        # session's AI title, which tells them apart.
+        infos = {}
+        for path, mtime in files[:12]:
+            if path in claimed:
+                continue
+            infos[path] = claude_session_info(path)
+            if infos[path][0] and infos[path][0] == wanted:
+                chosen = path
+                break
+        if not chosen:
+            chosen = next((p for p, _m in files if p not in claimed), None)
+        if not chosen:
+            continue
+        claimed.add(chosen)
+        title, model, activity = infos.get(chosen) or claude_session_info(chosen)
+
+        if WAITING_RE.match(window_title):
+            state = "waiting"
+        elif WORKING_RE.match(window_title):
+            state = "working"
+        else:
+            continue
+
+        sessions.append({
+            "agent": "claude",
+            "app": "Claude Code",
+            "id": os.path.basename(chosen)[:-6],
+            "state": state,
+            "model": model,
+            # The window title is what the user sees; the log's AI title is
+            # the fallback for a terminal that doesn't show it.
+            "title": one_line(wanted or title or "Claude Code", 80),
+            "activity": one_line(activity.split("\n")[0] if activity else ""),
+            "cwd": cwd,
+            "address": address,
+            "link": "",
+            "updated": int(os.path.getmtime(chosen)),
+        })
+    return sessions
+
+
+# ---------------------------------------------------------------- main
+
+def snapshot():
+    now = time.time()
+    procs = processes()
+    clients = hypr_clients()
+    client_by_pid = {c.get("pid"): c for c in clients if c.get("pid")}
+    sessions = []
+    for collect in (codex_sessions, claude_sessions):
+        try:
+            sessions.extend(collect(now, procs, clients, client_by_pid))
+        except Exception as exc:  # one broken source must not hide the other
+            print("lanes-agents: %s: %s" % (collect.__name__, exc), file=sys.stderr)
+    sessions.sort(key=lambda s: (s["state"] != "waiting", -s["updated"]))
+    return {"version": 1, "sessions": sessions}
+
+
+def write_atomic(text):
+    os.makedirs(OUT_DIR, exist_ok=True)
+    tmp = OUT_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, OUT_FILE)
+
+
+def main():
+    once = "--once" in sys.argv
+    parent = os.getppid()
+    last = None
+    while True:
+        text = json.dumps(snapshot(), sort_keys=True)
+        if once:
+            print(text)
+            return
+        if text != last:
+            write_atomic(text)
+            last = text
+        time.sleep(INTERVAL)
+        if os.getppid() != parent:
+            return  # the shell went away
+
+
+if __name__ == "__main__":
+    main()
