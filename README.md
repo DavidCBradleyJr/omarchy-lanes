@@ -22,14 +22,32 @@ corner rounding and bar sizing and restyles itself when you switch themes.
 
 ## Install
 
-Requires an Omarchy release with the Quickshell-based `omarchy-shell` (tested on Omarchy 4.0.4, Quickshell 0.3.1, Hyprland 0.56).
+Requires an Omarchy release with the Quickshell-based `omarchy-shell` (tested on
+Omarchy 4.0.4, Quickshell 0.3.1, Hyprland 0.56 with the Lua dispatcher API).
+
+No external dependencies. Pinned launchers start apps with `uwsm-app` and
+`gtk-launch`, which ship with Omarchy.
 
 ```bash
 omarchy plugin add https://github.com/DavidCBradleyJr/omarchy-lanes.git --enable
 ```
 
-Update with `omarchy plugin update davidcbradleyjr.lanes`. Remove with
-`omarchy plugin remove davidcbradleyjr.lanes`.
+The keyboard shortcuts are optional and not installed automatically; see
+[Mouse and keyboard](#mouse-and-keyboard).
+
+Update with `omarchy plugin update davidcbradleyjr.lanes`.
+
+## Uninstall
+
+```bash
+omarchy plugin remove davidcbradleyjr.lanes
+```
+
+If you set up the keyboard shortcuts, also delete the `pcall(require, "hypr.lanes")`
+line from `~/.config/hypr/hyprland.lua` and remove `~/.config/hypr/lanes.lua`.
+
+Lanes never edits your configuration files. At runtime it only writes minimize
+records to `$XDG_RUNTIME_DIR/hyprland-minimizer/` (temporary, cleared at logout).
 
 ## Configure
 
