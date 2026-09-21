@@ -6,9 +6,9 @@ import qs.Ui
 import "TaskbarModel.js" as Model
 
 // Lanes in the Omarchy top bar.
-//   mode "summary": agents waiting / working and minimized windows as small
+//   mode "summary": agents waiting / working (always shown, 0 when idle) and
+//                   minimized windows (only when there are some) as small
 //                   counters; click for a popup that jumps to any of them.
-//                   Hides itself when there's nothing to show.
 //   mode "lanes":   the whole lanes strip inline in the bar.
 BarWidget {
   id: root
@@ -28,9 +28,7 @@ BarWidget {
     for (var i = 0; i < all.length; i++) if (core.isMinimized(all[i])) n++
     return n
   }
-  readonly property bool hasSummary: waiting + working + minimizedCount > 0
-
-  visible: mode === "lanes" ? !vertical : hasSummary
+  visible: mode === "lanes" ? !vertical : true
   implicitWidth: !visible ? 0 : (mode === "lanes" ? lanes.implicitWidth : summary.implicitWidth)
   implicitHeight: barSize
 
@@ -83,12 +81,14 @@ BarWidget {
     Counter {
       glyph: "✳"
       count: root.waiting
+      showZero: true
       accent: true
       tooltip: root.waiting === 1 ? "1 agent waiting for you" : root.waiting + " agents waiting for you"
     }
     Counter {
       glyph: "◐"
       count: root.working
+      showZero: true
       tooltip: root.working === 1 ? "1 agent working" : root.working + " agents working"
     }
     Counter {
@@ -103,9 +103,10 @@ BarWidget {
     property string glyph: ""
     property int count: 0
     property bool accent: false
+    property bool showZero: false
     property string tooltip: ""
 
-    visible: count > 0
+    visible: count > 0 || showZero
     implicitWidth: visible ? label.implicitWidth + Style.space(12) : 0
     implicitHeight: root.barSize
 
@@ -121,7 +122,8 @@ BarWidget {
       id: label
       anchors.centerIn: parent
       text: counter.glyph + " " + counter.count
-      color: counter.accent ? Color.accent : (root.bar ? root.bar.barForeground : Color.bar.text)
+      color: counter.accent && counter.count > 0 ? Color.accent : (root.bar ? root.bar.barForeground : Color.bar.text)
+      opacity: counter.count > 0 ? 1 : 0.45
       font.family: root.bar ? root.bar.fontFamily : Style.font.family
       font.pixelSize: Style.font.body
       textFormat: Text.PlainText

@@ -17,7 +17,7 @@ corner rounding and bar sizing and restyles itself when you switch themes.
   You get a notification when an agent finishes somewhere you aren't looking, and
   Ctrl+Alt+A jumps to the next one waiting
 - **Top-bar widget.** A compact `✳ 2  ◐ 1  󰖰 3` summary (agents waiting, agents
-  working, minimized windows) that opens a jump list. Or put the whole lanes strip in
+  working, minimized windows; `✳ 0  ◐ 0` when idle) that opens a jump list. Or put the whole lanes strip in
   the top bar instead of a bottom bar
 - **Auto-hide** for the bottom bar, toggled with Ctrl+Alt+H and remembered
 - **Right-click menu:** minimize, floating, pin, fullscreen, move to
@@ -159,8 +159,9 @@ agent that doesn't set its title can't be detected.
 ## Top bar
 
 The widget sits next to Omarchy's own **Agents** widget: that one covers plan usage and
-limits, and Lanes covers what your agents are doing right now. In `summary` mode it
-hides itself when there's nothing to count.
+limits, and Lanes covers what your agents are doing right now. In `summary` mode the
+agent counters are always shown (dimmed `0` when nothing's running); the minimized
+counter appears only when a window is minimized.
 
 `"mode": "lanes"` moves the whole strip into the top bar and turns the bottom bar off
 (set `"bottomBar": "show"` to keep both). The Omarchy bar doesn't share out space
