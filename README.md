@@ -130,9 +130,10 @@ omarchy-shell shell call davidcbradleyjr.lanes toggleVisible ""
 
 ## Develop
 
+Work from your own checkout of this repository, linked in as the plugin:
+
 ```bash
-git clone https://github.com/DavidCBradleyJr/omarchy-lanes.git
-ln -s "$PWD/omarchy-lanes" ~/.config/omarchy/plugins/davidcbradleyjr.lanes
+ln -s /path/to/your/checkout ~/.config/omarchy/plugins/davidcbradleyjr.lanes
 omarchy-shell shell rescanPlugins
 omarchy plugin enable davidcbradleyjr.lanes
 node tests/model.test.js   # unit tests for the pure logic in TaskbarModel.js
