@@ -14,6 +14,8 @@ Item {
   property bool active: false
   property bool urgent: false
   property bool minimized: false
+  // "working", "waiting" or "" (agent state from the window title)
+  property string agent: ""
   property bool showLabel: true
   property bool edgeTop: false
   property real maxWidth: 220
@@ -88,7 +90,6 @@ Item {
     anchors.horizontalCenter: root.showLabel ? undefined : parent.horizontalCenter
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(6)
-    clip: true
     opacity: root.minimized && !root.hovered ? 0.45 : 1
 
     Behavior on opacity { NumberAnimation { duration: 140 } }
@@ -110,6 +111,48 @@ Item {
         asynchronous: true
         visible: status === Image.Ready
         opacity: root.active || root.hovered ? 1 : 0.8
+      }
+
+      // Agent waiting for you: pulsing accent dot on the icon's corner.
+      Rectangle {
+        visible: root.agent === "waiting"
+        z: 2
+        width: Math.max(6, Style.space(7))
+        height: width
+        radius: width / 2
+        x: parent.width - width / 2 - 1
+        y: -height / 3
+        color: Color.accent
+        border.width: 1
+        border.color: Color.bar.background
+
+        SequentialAnimation on opacity {
+          running: root.agent === "waiting"
+          loops: Animation.Infinite
+          NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
+          NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
+        }
+      }
+
+      // Agent working: a small spinner on the icon's corner.
+      Text {
+        id: spinner
+        property int frame: 0
+        visible: root.agent === "working"
+        z: 2
+        x: parent.width - implicitWidth / 2
+        y: parent.height - implicitHeight + Style.space(3)
+        text: ["\u25D0", "\u25D3", "\u25D1", "\u25D2"][frame]
+        color: Color.accent
+        font.pixelSize: Style.font.caption
+        textFormat: Text.PlainText
+
+        Timer {
+          running: root.agent === "working" && root.visible
+          repeat: true
+          interval: 160
+          onTriggered: spinner.frame = (spinner.frame + 1) % 4
+        }
       }
 
       // Monogram when the icon theme has nothing for this app.

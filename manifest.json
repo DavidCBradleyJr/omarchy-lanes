@@ -2,13 +2,128 @@
   "schemaVersion": 1,
   "id": "davidcbradleyjr.lanes",
   "name": "Lanes",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "David Bradley",
-  "description": "A workspace-first taskbar for the Omarchy shell: windows grouped into lanes by workspace, with minimize, a Hyprland action menu, and Ctrl+Alt+N keys.",
+  "description": "A workspace-first taskbar for the Omarchy shell: windows grouped into lanes by workspace, agent badges for Claude Code and friends, minimize, a Hyprland window menu, and an optional top-bar widget.",
   "homepage": "https://github.com/DavidCBradleyJr/omarchy-lanes",
-  "kinds": ["panel"],
+  "kinds": [
+    "panel",
+    "bar-widget"
+  ],
   "keepLoaded": true,
   "entryPoints": {
-    "panel": "Taskbar.qml"
+    "panel": "Taskbar.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Lanes",
+    "description": "Agents waiting or working and minimized windows at a glance, or the whole lanes strip inline.",
+    "category": "Compositor",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "mode": "summary"
+    },
+    "schema": [
+      {
+        "key": "mode",
+        "type": "enum",
+        "label": "Top bar",
+        "options": [
+          "summary",
+          "lanes"
+        ],
+        "defaultValue": "summary",
+        "description": "summary: agent and minimized counters with a popup. lanes: the whole strip in the top bar (turns the bottom bar off unless Bottom bar is set)."
+      },
+      {
+        "key": "bottomBar",
+        "type": "enum",
+        "label": "Bottom bar",
+        "options": [
+          "show",
+          "off"
+        ],
+        "defaultValue": "show"
+      },
+      {
+        "key": "autoHide",
+        "type": "boolean",
+        "label": "Auto-hide bottom bar",
+        "defaultValue": false,
+        "description": "Slide the bottom bar away until the pointer reaches the screen edge. Ctrl+Alt+H toggles it."
+      },
+      {
+        "key": "scope",
+        "type": "enum",
+        "label": "Windows shown",
+        "options": [
+          "workspace",
+          "monitor",
+          "all"
+        ],
+        "defaultValue": "workspace"
+      },
+      {
+        "key": "groupByWorkspace",
+        "type": "boolean",
+        "label": "Group by workspace",
+        "defaultValue": true
+      },
+      {
+        "key": "showTitles",
+        "type": "boolean",
+        "label": "Show window titles",
+        "defaultValue": true
+      },
+      {
+        "key": "clickToMinimize",
+        "type": "boolean",
+        "label": "Click focused window to minimize",
+        "defaultValue": true
+      },
+      {
+        "key": "agents",
+        "type": "boolean",
+        "label": "Agent badges",
+        "defaultValue": true
+      },
+      {
+        "key": "agentNotify",
+        "type": "boolean",
+        "label": "Notify when an agent finishes",
+        "defaultValue": true
+      },
+      {
+        "key": "position",
+        "type": "enum",
+        "label": "Bottom bar edge",
+        "options": [
+          "bottom",
+          "top"
+        ],
+        "defaultValue": "bottom"
+      },
+      {
+        "key": "align",
+        "type": "enum",
+        "label": "Alignment",
+        "options": [
+          "left",
+          "center",
+          "right"
+        ],
+        "defaultValue": "left"
+      },
+      {
+        "key": "maxButtonWidth",
+        "type": "integer",
+        "label": "Max button width",
+        "min": 40,
+        "max": 600,
+        "step": 10,
+        "defaultValue": 220
+      }
+    ]
   }
 }

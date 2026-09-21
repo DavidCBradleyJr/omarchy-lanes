@@ -34,8 +34,32 @@ var DEFAULTS = {
   // Desktop entry ids (e.g. "firefox", "org.gnome.Nautilus") shown as
   // launchers. Clicking one focuses a running window of that app, or
   // launches it.
-  pinned: []
+  pinned: [],
+  // Top-bar widget: "summary" (agent + minimized counts with a popup) or
+  // "lanes" (the whole strip inline in the top bar).
+  mode: "summary",
+  // Bottom bar: "show" or "off". Defaults to "off" in lanes mode, since the
+  // strip already lives in the top bar.
+  bottomBar: null,
+  // Slide the bottom bar away until the pointer reaches the screen edge.
+  autoHide: false,
+  // Agent badges from terminal titles (Claude Code sets "✳ …" when waiting
+  // for input and a spinner while working).
+  agents: true,
+  // Desktop notification when an agent finishes and you aren't looking at it.
+  agentNotify: true,
+  // Optional regexes (as strings) matched against window titles, for agents
+  // that mark their state differently.
+  agentWorkingPattern: "",
+  agentWaitingPattern: "",
+  // Inline mode: space (px, before scaling) kept free on each side of the
+  // top bar's center for the clock and friends.
+  centerReserve: 260
 }
+
+// Leading glyphs Claude Code puts in the terminal title.
+var WORKING_RE = /^[\u25D0-\u25D3\u2800-\u28FF]\s/   // ◐◑◒◓ and braille spinners
+var WAITING_RE = /^\u2733\s/                           // ✳
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -49,15 +73,34 @@ function boolOr(value, fallback) {
   return typeof value === "boolean" ? value : fallback
 }
 
-// Find this plugin's entry in a parsed shell.json. Enabled third-party
-// plugins live in the top-level plugins[] array with inline settings.
+// Find this plugin's entry in a parsed shell.json. Enabling a plugin that
+// ships a bar widget puts its entry in the bar layout; older installs (and
+// panel-only setups) keep it in the top-level plugins[] array. Both the
+// bottom bar and the top-bar widget read their settings from this one entry.
 function findEntry(config, id) {
-  if (!isPlainObject(config) || !Array.isArray(config.plugins)) return null
-  for (var i = 0; i < config.plugins.length; i++) {
-    var entry = config.plugins[i]
-    if (isPlainObject(entry) && entry.id === id) return entry
+  if (!isPlainObject(config)) return null
+  // Same order as the shell's own updateEntryInline: a bar layout entry wins,
+  // so settings the shell writes are the ones we read back.
+  var layout = isPlainObject(config.bar) && isPlainObject(config.bar.layout) ? config.bar.layout : null
+  if (layout) {
+    var sections = ["left", "center", "right"]
+    for (var s = 0; s < sections.length; s++) {
+      var list = Array.isArray(layout[sections[s]]) ? layout[sections[s]] : []
+      for (var j = 0; j < list.length; j++)
+        if (isPlainObject(list[j]) && list[j].id === id) return list[j]
+    }
+  }
+  if (Array.isArray(config.plugins)) {
+    for (var i = 0; i < config.plugins.length; i++) {
+      var entry = config.plugins[i]
+      if (isPlainObject(entry) && entry.id === id) return entry
+    }
   }
   return null
+}
+
+function stringOr(value, fallback) {
+  return typeof value === "string" ? value : fallback
 }
 
 function normalizeSettings(entry) {
@@ -76,8 +119,25 @@ function normalizeSettings(entry) {
     clickToMinimize: boolOr(e.clickToMinimize, DEFAULTS.clickToMinimize),
     transparent: boolOr(e.transparent, DEFAULTS.transparent),
     align: oneOf(e.align, ["left", "center", "right"], DEFAULTS.align),
-    pinned: pinned
+    pinned: pinned,
+    mode: oneOf(e.mode, ["summary", "lanes"], DEFAULTS.mode),
+    bottomBar: oneOf(e.bottomBar, ["show", "off"], e.mode === "lanes" ? "off" : "show"),
+    autoHide: boolOr(e.autoHide, DEFAULTS.autoHide),
+    agents: boolOr(e.agents, DEFAULTS.agents),
+    agentNotify: boolOr(e.agentNotify, DEFAULTS.agentNotify),
+    agentWorkingPattern: stringOr(e.agentWorkingPattern, ""),
+    agentWaitingPattern: stringOr(e.agentWaitingPattern, ""),
+    centerReserve: isFinite(Number(e.centerReserve)) && Number(e.centerReserve) >= 0 ? Math.round(Number(e.centerReserve)) : DEFAULTS.centerReserve
   }
+}
+
+// The raw entry (all keys) so a settings change can be written back without
+// dropping anything the user added by hand.
+function entryFromText(text, id) {
+  var parsed = null
+  try { parsed = JSON.parse(text || "{}") } catch (e) { parsed = null }
+  var entry = findEntry(parsed, id || PLUGIN_ID)
+  return entry ? JSON.parse(JSON.stringify(entry)) : null
 }
 
 function settingsFromText(text, id) {
@@ -197,6 +257,57 @@ function workspaceLabel(id) {
   return n === 10 ? "0" : String(n)
 }
 
+// ---- agents
+
+function compilePattern(source) {
+  if (!source) return null
+  try { return new RegExp(source) } catch (e) { return null }
+}
+
+// "working", "waiting" or "" from a window title. Custom patterns win over
+// the built-in Claude Code glyphs.
+function agentState(title, settings) {
+  var t = String(title || "")
+  var s = settings || {}
+  var working = compilePattern(s.agentWorkingPattern)
+  var waiting = compilePattern(s.agentWaitingPattern)
+  if (working && working.test(t)) return "working"
+  if (waiting && waiting.test(t)) return "waiting"
+  if (WORKING_RE.test(t)) return "working"
+  if (WAITING_RE.test(t)) return "waiting"
+  return ""
+}
+
+// Title without the leading status glyph, for when a badge shows the state.
+function agentLabel(title) {
+  var t = String(title || "")
+  return WORKING_RE.test(t) || WAITING_RE.test(t) ? t.replace(/^\S+\s+/, "") : t
+}
+
+// Addresses whose agent went from working to waiting since the last look.
+function finishedAgents(previous, current) {
+  var out = []
+  for (var addr in current)
+    if (current[addr] === "waiting" && previous[addr] === "working") out.push(addr)
+  return out
+}
+
+// Next waiting agent after `current` in list order, wrapping. -1 if none.
+function nextWaitingIndex(states, current) {
+  var n = states.length
+  for (var step = 1; step <= n; step++) {
+    var i = ((current < 0 ? -1 : current) + step + n) % n
+    if (states[i] === "waiting") return i
+  }
+  return -1
+}
+
+function agentCounts(states) {
+  var c = { working: 0, waiting: 0 }
+  for (var i = 0; i < states.length; i++) if (c[states[i]] !== undefined) c[states[i]]++
+  return c
+}
+
 // Hyprland addresses are "0x…" in hyprctl and the sidecar; Quickshell may
 // hand them over without the prefix.
 function normalizeAddress(address) {
@@ -270,3 +381,16 @@ function historyWithout(text, address) {
 function historyLines(text) {
   return String(text || "").split("\n").map(function(l) { return l.trim() }).filter(function(l) { return l.length > 0 })
 }
+
+// ---- strip registry
+// .pragma library state is shared by every importer in the shell, so the
+// bottom bar and the top-bar widget can find each other's strips (used by the
+// keyboard "menu" command, which needs a button to anchor to).
+var strips = []
+
+function registerStrip(strip) { if (strips.indexOf(strip) === -1) strips.push(strip) }
+function unregisterStrip(strip) {
+  var i = strips.indexOf(strip)
+  if (i !== -1) strips.splice(i, 1)
+}
+function stripList() { return strips.slice() }

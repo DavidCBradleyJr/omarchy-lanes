@@ -6,7 +6,7 @@ const assert = require("assert")
 // TaskbarModel.js is a QML JS library (".pragma library"); strip the pragma
 // and evaluate it as a plain script.
 const src = fs.readFileSync(path.join(__dirname, "..", "TaskbarModel.js"), "utf8").replace(".pragma library", "")
-const M = new Function(src + "; return { PLUGIN_ID, MINIMIZED_WORKSPACE, DEFAULTS, findEntry, normalizeSettings, settingsFromText, windowVisible, groupFor, displayOrder, groupStarts, cycleIndex, nthIndex, appMatches, workspaceLabel, normalizeAddress, dispatch, parseState, stateWith, stateWithout, historyWith, historyWithout }")()
+const M = new Function(src + "; return { PLUGIN_ID, MINIMIZED_WORKSPACE, DEFAULTS, findEntry, normalizeSettings, settingsFromText, windowVisible, groupFor, displayOrder, groupStarts, cycleIndex, nthIndex, appMatches, workspaceLabel, normalizeAddress, dispatch, parseState, stateWith, stateWithout, historyWith, historyWithout, entryFromText, agentState, agentLabel, finishedAgents, nextWaitingIndex, agentCounts }")()
 
 let passed = 0
 function test(name, fn) { fn(); passed++; console.log("ok -", name) }
@@ -139,6 +139,52 @@ test("minimizer sidecar round trip", () => {
   assert.strictEqual(hist, "0xabc\n0xdef\n")
   assert.strictEqual(M.historyWithout(hist, "abc"), "0xdef\n")
   assert.strictEqual(M.historyWithout("0xabc\n", "0xabc"), "")
+})
+
+test("entry lives in plugins[] or the bar layout", () => {
+  const inBar = JSON.stringify({ version: 1, plugins: [], bar: { layout: { left: [{ id: "omarchy.menu" }], center: [], right: [{ id: M.PLUGIN_ID, mode: "lanes" }] } } })
+  assert.strictEqual(M.settingsFromText(inBar).mode, "lanes")
+  assert.deepStrictEqual(M.entryFromText(inBar), { id: M.PLUGIN_ID, mode: "lanes" })
+  // the bar layout entry wins when both exist, matching the shell's writes
+  const both = JSON.stringify({ plugins: [{ id: M.PLUGIN_ID, scope: "all" }], bar: { layout: { right: [{ id: M.PLUGIN_ID, scope: "monitor" }] } } })
+  assert.strictEqual(M.settingsFromText(both).scope, "monitor")
+  assert.strictEqual(M.entryFromText("{}"), null)
+})
+
+test("bottom bar and auto-hide settings", () => {
+  const d = M.normalizeSettings(null)
+  assert.strictEqual(d.mode, "summary")
+  assert.strictEqual(d.bottomBar, "show")
+  assert.strictEqual(d.autoHide, false)
+  assert.strictEqual(M.normalizeSettings({ mode: "lanes" }).bottomBar, "off")
+  assert.strictEqual(M.normalizeSettings({ mode: "lanes", bottomBar: "show" }).bottomBar, "show")
+  assert.strictEqual(M.normalizeSettings({ bottomBar: "sometimes" }).bottomBar, "show")
+  assert.strictEqual(M.normalizeSettings({ autoHide: true }).autoHide, true)
+})
+
+test("agent state from titles", () => {
+  assert.strictEqual(M.agentState("✳ Local models on Omarchy", {}), "waiting")
+  assert.strictEqual(M.agentState("◐ Omarchy taskbar customization", {}), "working")
+  assert.strictEqual(M.agentState("⠙ codex", {}), "working")
+  assert.strictEqual(M.agentState("deej@omarchy:~", {}), "")
+  assert.strictEqual(M.agentState("✳nospace", {}), "")
+  // custom patterns win
+  assert.strictEqual(M.agentState("[busy] opencode", { agentWorkingPattern: "^\\[busy\\]" }), "working")
+  assert.strictEqual(M.agentState("✳ x", { agentWorkingPattern: "^✳" }), "working")
+  // a broken pattern is ignored, not fatal
+  assert.strictEqual(M.agentState("✳ x", { agentWaitingPattern: "(" }), "waiting")
+  assert.strictEqual(M.agentLabel("✳ Local models"), "Local models")
+  assert.strictEqual(M.agentLabel("plain title"), "plain title")
+})
+
+test("agent transitions, cycling and counts", () => {
+  assert.deepStrictEqual(M.finishedAgents({ a: "working", b: "waiting", c: "working" }, { a: "waiting", b: "waiting", c: "working", d: "waiting" }), ["a"])
+  const states = ["", "waiting", "working", "waiting"]
+  assert.strictEqual(M.nextWaitingIndex(states, -1), 1)
+  assert.strictEqual(M.nextWaitingIndex(states, 1), 3)
+  assert.strictEqual(M.nextWaitingIndex(states, 3), 1)
+  assert.strictEqual(M.nextWaitingIndex(["", "working"], 0), -1)
+  assert.deepStrictEqual(M.agentCounts(states), { working: 1, waiting: 2 })
 })
 
 console.log(`\n${passed} tests passed`)

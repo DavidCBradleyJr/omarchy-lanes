@@ -18,3 +18,5 @@ end
 
 o.bind("CTRL + ALT + M", "Lanes window menu", call .. "menu ''")
 o.bind("CTRL + ALT + B", "Toggle Lanes", call .. "toggleVisible ''")
+o.bind("CTRL + ALT + A", "Lanes: next waiting agent", call .. "nextAgent ''")
+o.bind("CTRL + ALT + H", "Lanes: toggle auto-hide", call .. "toggleAutoHide ''")

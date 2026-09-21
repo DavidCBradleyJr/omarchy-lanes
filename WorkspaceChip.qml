@@ -7,6 +7,8 @@ Item {
 
   property string label: ""
   property bool current: false
+  // "waiting" if an agent in this workspace waits on you, "working" if one is busy
+  property string agent: ""
   property int barSize: Style.bar.sizeHorizontal
   property string fontFamily: Style.font.family
 
@@ -37,6 +39,20 @@ Item {
     font.pixelSize: Style.font.bodySmall
     font.bold: root.current
     textFormat: Text.PlainText
+  }
+
+  Rectangle {
+    visible: root.agent !== ""
+    width: Math.max(5, Style.space(5))
+    height: width
+    radius: width / 2
+    anchors.right: parent.right
+    anchors.top: parent.top
+    anchors.topMargin: Style.space(3)
+    color: Color.accent
+    opacity: root.agent === "waiting" ? 1 : 0.4
+    border.width: 1
+    border.color: Color.bar.background
   }
 
   MouseArea {

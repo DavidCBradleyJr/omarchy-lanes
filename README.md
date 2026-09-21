@@ -12,6 +12,14 @@ corner rounding and bar sizing and restyles itself when you switch themes.
 - **Minimize, compatible with other plugins.** Click the focused window to minimize it; it stays on the taskbar,
   dimmed, until you click it again. Uses the community `special:minimized`
   convention, so it interoperates with AppDock and minimize-aware Alt-Tab switchers
+- **Agent badges.** Terminals running Claude Code show a spinner while the agent
+  works and a pulsing dot when it's waiting for you, and so does their workspace chip.
+  You get a notification when an agent finishes somewhere you aren't looking, and
+  Ctrl+Alt+A jumps to the next one waiting
+- **Top-bar widget.** A compact `✳ 2  ◐ 1  󰖰 3` summary (agents waiting, agents
+  working, minimized windows) that opens a jump list. Or put the whole lanes strip in
+  the top bar instead of a bottom bar
+- **Auto-hide** for the bottom bar, toggled with Ctrl+Alt+H and remembered
 - **Right-click menu:** minimize, floating, pin, fullscreen, move to
   workspace 1–0, move to the next monitor, close. Click outside it to dismiss
 - **Keyboard:** Ctrl+Alt+1…0 acts on the Nth window, Ctrl+Alt+M opens its menu
@@ -32,7 +40,8 @@ No external dependencies. Pinned launchers start apps with `uwsm-app` and
 omarchy plugin add https://github.com/DavidCBradleyJr/omarchy-lanes.git --enable
 ```
 
-The keyboard shortcuts are optional and not installed automatically; see
+Enabling it adds the Lanes widget to the right of your top bar and turns on the
+bottom bar. The keyboard shortcuts are optional and not installed automatically; see
 [Mouse and keyboard](#mouse-and-keyboard).
 
 Update with `omarchy plugin update davidcbradleyjr.lanes`.
@@ -51,13 +60,20 @@ records to `$XDG_RUNTIME_DIR/hyprland-minimizer/` (temporary, cleared at logout)
 
 ## Configure
 
-Settings are inline on the plugin's entry in `~/.config/omarchy/shell.json`.
-Every key is optional:
+Settings are inline on the plugin's entry in `~/.config/omarchy/shell.json`, which
+lives in the bar layout alongside the widget (installs from before v0.3 keep it in
+`plugins[]`; both work). The bottom bar and the widget share the one entry. Every
+key is optional, and the Setup panel offers a form for them:
 
 ```json
-"plugins": [
+"right": [
   {
     "id": "davidcbradleyjr.lanes",
+    "mode": "summary",
+    "bottomBar": "show",
+    "autoHide": false,
+    "agents": true,
+    "agentNotify": true,
     "position": "bottom",
     "scope": "workspace",
     "align": "left",
@@ -73,6 +89,13 @@ Every key is optional:
 
 | Key | Values | Default | |
 |---|---|---|---|
+| `mode` | `summary`, `lanes` | `summary` | Top-bar widget: counters with a jump list, or the whole strip inline |
+| `bottomBar` | `show`, `off` | `show` (`off` in lanes mode) | The bottom bar |
+| `autoHide` | bool | `false` | Slide the bottom bar away until the pointer reaches the edge. Ctrl+Alt+H toggles it |
+| `agents` | bool | `true` | Agent badges and counters |
+| `agentNotify` | bool | `true` | Notify when an agent finishes while you're looking elsewhere |
+| `agentWorkingPattern`, `agentWaitingPattern` | regex string | – | Extra title patterns for other agents |
+| `centerReserve` | px | `260` | Lanes mode: room kept free on each side of the top bar's center |
 | `position` | `bottom`, `top` | `bottom` | Screen edge. If you choose `top`, move the Omarchy bar to the bottom |
 | `scope` | `workspace`, `monitor`, `all` | `workspace` | Which windows each monitor's taskbar lists |
 | `align` | `left`, `center`, `right` | `left` | Where the buttons sit |
@@ -99,6 +122,8 @@ Minimized windows show on the taskbar of the workspace they were minimized from.
 | Click a workspace chip | Switch to that workspace |
 | Ctrl+Alt+1 … 9, 0 | Same as left-clicking the Nth window on the focused monitor |
 | Ctrl+Alt+M | Toggle the window menu for the focused window |
+| Ctrl+Alt+A | Jump to the next agent waiting for you |
+| Ctrl+Alt+H | Toggle bottom-bar auto-hide (saved) |
 | Ctrl+Alt+B | Show / hide the taskbar |
 
 Omarchy already uses Super+number for workspaces, so the taskbar uses Ctrl+Alt.
@@ -113,6 +138,39 @@ ln -s ~/.config/omarchy/plugins/davidcbradleyjr.lanes/hypr/lanes.lua ~/.config/h
 Keyboard layouts where AltGr acts as Ctrl+Alt (German, Polish, …) use AltGr+digits for
 characters. On those, edit the modifier in `lanes.lua`.
 
+## Agents
+
+Claude Code writes its state into the terminal title: `✳ …` while it waits for
+input, a spinning `◐◓◑◒ …` while it works. Lanes reads that, so there's nothing to
+set up. It works in any terminal and on any workspace, with no hooks, tmux, or herdr.
+
+- A **spinner** on a window's icon means its agent is working. A **pulsing dot**
+  means it's waiting for you. The workspace chip gets a dot too, so you can see
+  "workspace 6 needs me" without looking at the windows
+- When an agent goes from working to waiting and its window isn't focused, you get a
+  desktop notification
+- The top-bar widget counts agents waiting (`✳`) and working (`◐`); click it for a
+  list, click a row to go there. Ctrl+Alt+A cycles through waiting agents
+
+For agents that mark their titles differently, add patterns, e.g.
+`"agentWaitingPattern": "^\\[waiting\\]"`. Lanes only knows what the title says, so an
+agent that doesn't set its title can't be detected.
+
+## Top bar
+
+The widget sits next to Omarchy's own **Agents** widget: that one covers plan usage and
+limits, and Lanes covers what your agents are doing right now. In `summary` mode it
+hides itself when there's nothing to count.
+
+`"mode": "lanes"` moves the whole strip into the top bar and turns the bottom bar off
+(set `"bottomBar": "show"` to keep both). The Omarchy bar doesn't share out space
+between its sections, so the strip measures the room up to the bar's center and drops
+to icons only when titles won't fit. It has the most room in the left section:
+
+```bash
+omarchy bar move davidcbradleyjr.lanes --section left
+```
+
 ## Minimize convention
 
 Minimized windows are moved to `special:minimized`, and their origin is recorded in
@@ -125,6 +183,8 @@ uses, so windows minimized by either tool can be restored by the other.
 ```bash
 omarchy-shell shell call davidcbradleyjr.lanes focusIndex 3
 omarchy-shell shell call davidcbradleyjr.lanes menu ""
+omarchy-shell shell call davidcbradleyjr.lanes nextAgent ""
+omarchy-shell shell call davidcbradleyjr.lanes toggleAutoHide ""
 omarchy-shell shell call davidcbradleyjr.lanes toggleVisible ""
 ```
 
@@ -146,8 +206,11 @@ were already loaded keep their old code. Shell logs:
 
 | File | Role |
 |---|---|
-| `manifest.json` | Plugin manifest (`panel`, `keepLoaded`) |
-| `Taskbar.qml` | Per-monitor layer-shell windows, settings, window list |
+| `manifest.json` | Plugin manifest (`panel` + `bar-widget`, settings schema) |
+| `Taskbar.qml` | Bottom bar: per-monitor windows, auto-hide, IPC |
+| `BarWidget.qml` | Top-bar widget: summary counters and popup, or inline lanes |
+| `Actions.qml` | Shared core: settings, window list, agents, minimize, actions |
+| `LaneStrip.qml` | The lanes strip, used by the bottom bar and inline mode |
 | `TaskButton.qml` | A single themed button |
 | `WorkspaceChip.qml` | Workspace group label |
 | `ContextMenu.qml` | Right-click menu (built on Omarchy's `PopupCard`) |
