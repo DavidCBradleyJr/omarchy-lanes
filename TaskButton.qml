@@ -113,7 +113,9 @@ Item {
         opacity: root.active || root.hovered ? 1 : 0.8
       }
 
-      // Agent waiting for you: pulsing accent dot on the icon's corner.
+      // Agent waiting for you: accent dot on the icon's corner. Deliberately
+      // static: an infinite animation redraws the whole bar surface every
+      // frame, which costs the shell ~20% CPU and makes other popups stutter.
       Rectangle {
         visible: root.agent === "waiting"
         z: 2
@@ -126,15 +128,10 @@ Item {
         border.width: 1
         border.color: Color.bar.background
 
-        SequentialAnimation on opacity {
-          running: root.agent === "waiting"
-          loops: Animation.Infinite
-          NumberAnimation { to: 0.35; duration: 700; easing.type: Easing.InOutSine }
-          NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
-        }
       }
 
-      // Agent working: a small spinner on the icon's corner.
+      // Agent working: a small spinner on the icon's corner, stepped slowly
+      // (each step repaints the bar).
       Text {
         id: spinner
         property int frame: 0
@@ -150,7 +147,7 @@ Item {
         Timer {
           running: root.agent === "working" && root.visible
           repeat: true
-          interval: 160
+          interval: 600
           onTriggered: spinner.frame = (spinner.frame + 1) % 4
         }
       }

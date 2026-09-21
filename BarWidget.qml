@@ -60,15 +60,19 @@ BarWidget {
   // Neighbouring widgets can grow or shrink without telling us.
   Timer { interval: 2000; repeat: true; running: root.mode === "lanes"; onTriggered: root.recomputeBudget() }
 
-  LaneStrip {
+  // Only built in lanes mode: a hidden strip would still track every window.
+  Loader {
     id: lanes
-    visible: root.mode === "lanes"
-    actions: core
-    maxWidth: root.budget
-    hyprMonitor: root.screenMonitor
-    barSize: root.barSize
-    edgeTop: !root.bar || root.bar.position !== "bottom"
+    active: root.mode === "lanes"
+    visible: active
     anchors.verticalCenter: parent.verticalCenter
+    sourceComponent: LaneStrip {
+      actions: core
+      maxWidth: root.budget
+      hyprMonitor: root.screenMonitor
+      barSize: root.barSize
+      edgeTop: !root.bar || root.bar.position !== "bottom"
+    }
   }
 
   // ------------------------------------------------------------- summary mode
