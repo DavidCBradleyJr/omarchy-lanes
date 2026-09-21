@@ -6,12 +6,18 @@ corner rounding and bar sizing and restyles itself when you switch themes.
 
 ![Taskbar screenshot](docs/screenshot.png)
 
-- One button per open window, with the app icon and title
-- The focused window is highlighted with the theme accent. Urgent windows use the theme's alert color
-- Optional pinned launchers: click to focus the running app, or launch it if it isn't open
-- One bar per monitor. Show windows from the active workspace, the whole monitor, or everywhere
-- Left-click focuses a window, middle-click closes it, and the scroll wheel cycles through them
-- Settings live in `shell.json` and hot-reload when you save
+- **Built around workspaces.** In `monitor` or `all` scope, windows are grouped
+  by workspace behind a clickable workspace chip, and the current workspace is highlighted
+- **Minimize, compatible with other plugins.** Click the focused window to minimize it; it stays on the taskbar,
+  dimmed, until you click it again. Uses the community `special:minimized`
+  convention, so it interoperates with AppDock and minimize-aware Alt-Tab switchers
+- **Right-click menu:** minimize, floating, pin, fullscreen, move to
+  workspace 1–0, move to the next monitor, close
+- **Keyboard:** Ctrl+Alt+1…0 acts on the Nth window, Ctrl+Alt+M opens its menu
+- App icons and titles, with the focused window underlined in the theme accent
+- Optional pinned launchers: focus the running app, or launch it
+- Middle-click closes a window, and the scroll wheel cycles focus through the windows
+- One bar per monitor. Settings live in `shell.json` and hot-reload when you save
 
 ## Install
 
@@ -37,7 +43,8 @@ Every key is optional:
     "scope": "workspace",
     "align": "left",
     "showTitles": true,
-    "showWorkspace": true,
+    "groupByWorkspace": true,
+    "clickToMinimize": true,
     "maxButtonWidth": 220,
     "transparent": false,
     "pinned": ["chromium", "org.gnome.Nautilus"]
@@ -51,22 +58,54 @@ Every key is optional:
 | `scope` | `workspace`, `monitor`, `all` | `workspace` | Which windows each monitor's taskbar lists |
 | `align` | `left`, `center`, `right` | `left` | Where the buttons sit |
 | `showTitles` | bool | `true` | Set to `false` for an icon-only dock strip |
-| `showWorkspace` | bool | `true` | Workspace number on each button (when `scope` isn't `workspace`) |
+| `groupByWorkspace` | bool | `true` | Sort by workspace with a chip per group (when `scope` isn't `workspace`) |
+| `clickToMinimize` | bool | `true` | Clicking the focused window minimizes it |
 | `maxButtonWidth` | number ≥ 40 | `220` | Longer titles are truncated |
 | `transparent` | bool | `false` | No background behind the strip |
 | `pinned` | desktop entry ids | `[]` | Launchers, e.g. `firefox`, `org.gnome.Nautilus` |
 
 Windows on special (scratchpad) workspaces are only listed with `scope: "all"`.
+Minimized windows show on the taskbar of the workspace they were minimized from.
 
-## Show / hide
+## Mouse and keyboard
 
-The taskbar can be toggled over shell IPC, so you can bind it to a key:
+| | |
+|---|---|
+| Left-click | Focus the window. If it's already focused, minimize it. If it's minimized, restore it |
+| Middle-click | Close the window |
+| Right-click | Window menu |
+| Scroll wheel | Cycle focus through the listed windows |
+| Click a workspace chip | Switch to that workspace |
+| Ctrl+Alt+1 … 9, 0 | Same as left-clicking the Nth window on the focused monitor |
+| Ctrl+Alt+M | Window menu for the focused window (Esc closes it) |
+| Ctrl+Alt+B | Show / hide the taskbar |
+
+Omarchy already uses Super+number for workspaces, so the taskbar uses Ctrl+Alt.
+The bindings are in [`hypr/taskbar.lua`](hypr/taskbar.lua):
 
 ```bash
-omarchy-shell shell call davidcbradleyjr.taskbar toggleVisible ""
+ln -s ~/.config/omarchy/plugins/davidcbradleyjr.taskbar/hypr/taskbar.lua ~/.config/hypr/taskbar.lua
+# then in ~/.config/hypr/hyprland.lua, after require("hypr.bindings"):
+#   pcall(require, "hypr.taskbar")
 ```
 
-For example, in `~/.config/hypr/bindings.lua`, bind that command with `o.bind`.
+Keyboard layouts where AltGr acts as Ctrl+Alt (German, Polish, …) use AltGr+digits for
+characters. On those, edit the modifier in `taskbar.lua`.
+
+## Minimize convention
+
+Minimized windows are moved to `special:minimized`, and their origin is recorded in
+`$XDG_RUNTIME_DIR/hyprland-minimizer/state.json` (plus a newest-first
+`history.txt`). This is the same format [AppDock](https://github.com/gdeyoung/omarchy-appdock)
+uses, so windows minimized by either tool can be restored by the other.
+
+## IPC
+
+```bash
+omarchy-shell shell call davidcbradleyjr.taskbar focusIndex 3
+omarchy-shell shell call davidcbradleyjr.taskbar menu ""
+omarchy-shell shell call davidcbradleyjr.taskbar toggleVisible ""
+```
 
 ## Develop
 
@@ -78,8 +117,9 @@ omarchy plugin enable davidcbradleyjr.taskbar
 node tests/model.test.js   # unit tests for the pure logic in TaskbarModel.js
 ```
 
-Saving plugin files reloads them automatically; with a symlinked checkout run
-`omarchy-shell shell rescanPlugins` if a change doesn't show up. Shell logs:
+After editing an already-loaded plugin, run `omarchy restart shell`. The shell's
+hot-reload rescans plugins but doesn't clear Qt's component cache, so QML files that
+were already loaded keep their old code. Shell logs:
 `journalctl --user -f | grep omarchy-shell`.
 
 | File | Role |
@@ -87,7 +127,10 @@ Saving plugin files reloads them automatically; with a symlinked checkout run
 | `manifest.json` | Plugin manifest (`panel`, `keepLoaded`) |
 | `Taskbar.qml` | Per-monitor layer-shell windows, settings, window list |
 | `TaskButton.qml` | A single themed button |
-| `TaskbarModel.js` | Pure logic: settings parsing, filtering, cycling, app matching |
+| `WorkspaceChip.qml` | Workspace group label |
+| `ContextMenu.qml` | Right-click menu (built on Omarchy's `PopupCard`) |
+| `hypr/taskbar.lua` | Keybindings |
+| `TaskbarModel.js` | Pure logic: settings, filtering, grouping, minimize records, dispatch strings |
 
 ## License
 

@@ -5,6 +5,11 @@
 
 var PLUGIN_ID = "davidcbradleyjr.taskbar"
 
+// Community minimize convention shared with AppDock and the window switcher
+// plugins: minimized windows live on this special workspace, and each one's
+// origin is recorded in $XDG_RUNTIME_DIR/hyprland-minimizer/state.json.
+var MINIMIZED_WORKSPACE = "special:minimized"
+
 var DEFAULTS = {
   // Screen edge to sit on: "bottom" or "top".
   position: "bottom",
@@ -17,8 +22,11 @@ var DEFAULTS = {
   showTitles: true,
   // Upper bound on a single button's width, before scaling.
   maxButtonWidth: 220,
-  // Prefix buttons with their workspace number when scope isn't "workspace".
-  showWorkspace: true,
+  // In "monitor"/"all" scope, sort windows by workspace and put a clickable
+  // workspace chip in front of each group.
+  groupByWorkspace: true,
+  // Clicking the already-focused window minimizes it.
+  clickToMinimize: true,
   // Paint no background behind the strip.
   transparent: false,
   // Where the buttons sit along the bar: "left", "center" or "right".
@@ -35,6 +43,10 @@ function isPlainObject(value) {
 
 function oneOf(value, allowed, fallback) {
   return allowed.indexOf(value) !== -1 ? value : fallback
+}
+
+function boolOr(value, fallback) {
+  return typeof value === "boolean" ? value : fallback
 }
 
 // Find this plugin's entry in a parsed shell.json. Enabled third-party
@@ -58,10 +70,11 @@ function normalizeSettings(entry) {
   return {
     position: oneOf(e.position, ["bottom", "top"], DEFAULTS.position),
     scope: oneOf(e.scope, ["workspace", "monitor", "all"], DEFAULTS.scope),
-    showTitles: typeof e.showTitles === "boolean" ? e.showTitles : DEFAULTS.showTitles,
+    showTitles: boolOr(e.showTitles, DEFAULTS.showTitles),
     maxButtonWidth: isFinite(width) && width >= 40 ? Math.round(width) : DEFAULTS.maxButtonWidth,
-    showWorkspace: typeof e.showWorkspace === "boolean" ? e.showWorkspace : DEFAULTS.showWorkspace,
-    transparent: typeof e.transparent === "boolean" ? e.transparent : DEFAULTS.transparent,
+    groupByWorkspace: boolOr(e.groupByWorkspace, DEFAULTS.groupByWorkspace),
+    clickToMinimize: boolOr(e.clickToMinimize, DEFAULTS.clickToMinimize),
+    transparent: boolOr(e.transparent, DEFAULTS.transparent),
     align: oneOf(e.align, ["left", "center", "right"], DEFAULTS.align),
     pinned: pinned
   }
@@ -73,13 +86,30 @@ function settingsFromText(text, id) {
   return normalizeSettings(findEntry(parsed, id || PLUGIN_ID))
 }
 
+function isMinimized(win) {
+  return !!win && win.workspaceName === MINIMIZED_WORKSPACE
+}
+
 // Decide whether a window belongs on a given monitor's taskbar.
-//   win:  { workspaceId, monitorName }
-//   view: { scope, monitorName, activeWorkspaceId }
-// Special (scratchpad) workspaces have negative ids and are only listed in
-// "all" scope, where the user asked to see everything.
+//   win:  { workspaceId, workspaceName, monitorName, origin }
+//         origin is the minimizer sidecar entry ({ workspace, monitor }) or null
+//   view: { scope, monitorName, activeWorkspaceId, activeWorkspaceName }
+// Minimized windows show where they came from, so a workspace-scoped taskbar
+// only lists the ones minimized from that workspace. One with no recorded
+// origin shows on its monitor's taskbar in every workspace, so it can't get
+// lost. Other special (scratchpad) workspaces are only listed in "all" scope.
 function windowVisible(win, view) {
   if (!win || !view) return false
+
+  if (isMinimized(win)) {
+    if (view.scope === "all") return true
+    var origin = isPlainObject(win.origin) ? win.origin : null
+    var monitor = origin && origin.monitor ? String(origin.monitor) : win.monitorName
+    if (monitor !== view.monitorName) return false
+    if (view.scope === "monitor") return true
+    return !origin || !origin.workspace || String(origin.workspace) === String(view.activeWorkspaceName)
+  }
+
   var wsId = Number(win.workspaceId)
   if (!isFinite(wsId)) return false
 
@@ -90,6 +120,40 @@ function windowVisible(win, view) {
   return wsId === Number(view.activeWorkspaceId)
 }
 
+// Workspace a window is grouped under: its origin while minimized.
+// Returns { key, label } where key sorts numerically and label is what the
+// workspace chip shows.
+var SPECIAL_KEY = 1000
+
+function groupFor(win) {
+  if (!win) return { key: SPECIAL_KEY + 1, label: "?" }
+  if (isMinimized(win)) {
+    var origin = isPlainObject(win.origin) ? win.origin : null
+    var n = origin ? Number(origin.workspace) : NaN
+    return isFinite(n) && n > 0 ? { key: n, label: workspaceLabel(n) } : { key: SPECIAL_KEY + 1, label: "–" }
+  }
+  var id = Number(win.workspaceId)
+  if (!isFinite(id)) return { key: SPECIAL_KEY + 1, label: "?" }
+  return id < 0 ? { key: SPECIAL_KEY, label: "S" } : { key: id, label: workspaceLabel(id) }
+}
+
+// Display order for windows given their group keys. Stable: windows in the
+// same workspace keep Hyprland's creation order, so buttons never jump around
+// when focus changes. Returns a permutation of indices.
+function displayOrder(keys, grouped) {
+  var idx = []
+  for (var i = 0; i < keys.length; i++) idx.push(i)
+  if (!grouped) return idx
+  return idx.sort(function(a, b) { return (keys[a] - keys[b]) || (a - b) })
+}
+
+// For already-ordered keys: true where a new workspace group starts.
+function groupStarts(orderedKeys) {
+  var out = []
+  for (var i = 0; i < orderedKeys.length; i++) out.push(i === 0 || orderedKeys[i] !== orderedKeys[i - 1])
+  return out
+}
+
 // Index to focus when the wheel moves over the bar. Wraps at both ends.
 // Returns -1 when there is nothing to cycle to.
 function cycleIndex(count, current, delta) {
@@ -97,6 +161,14 @@ function cycleIndex(count, current, delta) {
   var step = delta < 0 ? 1 : -1
   if (current < 0 || current >= count) return step > 0 ? 0 : count - 1
   return (current + step + count) % count
+}
+
+// Ctrl+Alt+N → list index. N is 1-based and "0" means the tenth window.
+function nthIndex(count, n) {
+  var k = Number(n)
+  if (!isFinite(k) || k < 0 || k > 10 || Math.floor(k) !== k) return -1
+  var index = k === 0 ? 9 : k - 1
+  return index < count ? index : -1
 }
 
 // Case-insensitive app matching between a desktop entry and a window's
@@ -123,4 +195,78 @@ function workspaceLabel(id) {
   if (!isFinite(n)) return ""
   if (n < 0) return "S"
   return n === 10 ? "0" : String(n)
+}
+
+// Hyprland addresses are "0x…" in hyprctl and the sidecar; Quickshell may
+// hand them over without the prefix.
+function normalizeAddress(address) {
+  var s = String(address || "")
+  if (!s) return ""
+  return s.indexOf("0x") === 0 ? s : "0x" + s
+}
+
+// Lua dispatch expressions for Hyprland 0.56+. Addresses and workspace names
+// are interpolated into a Lua string, so strip anything that could end it.
+function luaString(value) {
+  return "\"" + String(value).replace(/[\\"\n\r]/g, "") + "\""
+}
+
+function windowSelector(address) {
+  return "window = " + luaString("address:" + normalizeAddress(address))
+}
+
+var dispatch = {
+  focusWindow: function(address) { return "hl.dsp.focus({ " + windowSelector(address) + " })" },
+  focusWorkspace: function(name) { return "hl.dsp.focus({ workspace = " + luaString(name) + " })" },
+  moveToWorkspace: function(address, name, follow) {
+    return "hl.dsp.window.move({ " + windowSelector(address) + ", workspace = " + luaString(name)
+      + ", follow = " + (follow ? "true" : "false") + " })"
+  },
+  moveToMonitor: function(address, monitor) {
+    return "hl.dsp.window.move({ " + windowSelector(address) + ", monitor = " + luaString(monitor) + " })"
+  },
+  toggleFloating: function(address) { return "hl.dsp.window.float({ action = \"toggle\", " + windowSelector(address) + " })" },
+  togglePin: function(address) { return "hl.dsp.window.pin({ " + windowSelector(address) + " })" },
+  toggleFullscreen: function(address) { return "hl.dsp.window.fullscreen({ mode = \"fullscreen\", " + windowSelector(address) + " })" }
+}
+
+// ---- minimizer sidecar (state.json + history.txt), shared with AppDock
+
+function parseState(text) {
+  try {
+    var parsed = JSON.parse(text || "{}")
+    return isPlainObject(parsed) ? parsed : {}
+  } catch (e) {
+    return {}
+  }
+}
+
+function stateWith(state, address, entry) {
+  var out = {}
+  for (var k in state) out[k] = state[k]
+  out[normalizeAddress(address)] = entry
+  return out
+}
+
+function stateWithout(state, address) {
+  var addr = normalizeAddress(address)
+  var out = {}
+  for (var k in state) if (k !== addr) out[k] = state[k]
+  return out
+}
+
+// history.txt: one address per line, newest first.
+function historyWith(text, address) {
+  var addr = normalizeAddress(address)
+  return [addr].concat(historyLines(text).filter(function(l) { return l !== addr })).join("\n") + "\n"
+}
+
+function historyWithout(text, address) {
+  var addr = normalizeAddress(address)
+  var lines = historyLines(text).filter(function(l) { return l !== addr })
+  return lines.length ? lines.join("\n") + "\n" : ""
+}
+
+function historyLines(text) {
+  return String(text || "").split("\n").map(function(l) { return l.trim() }).filter(function(l) { return l.length > 0 })
 }

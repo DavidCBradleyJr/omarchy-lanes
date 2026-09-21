@@ -2,7 +2,7 @@ import QtQuick
 import Quickshell
 import qs.Commons
 
-// One taskbar button: app icon, optional workspace badge, optional title.
+// One taskbar button: app icon and optional title.
 // Colors and states come from the shared Omarchy Style/Color tokens so the
 // button follows whatever theme is active.
 Item {
@@ -11,9 +11,9 @@ Item {
   property string iconSource: ""
   property string fallbackGlyph: "?"
   property string label: ""
-  property string badge: ""
   property bool active: false
   property bool urgent: false
+  property bool minimized: false
   property bool showLabel: true
   property bool edgeTop: false
   property real maxWidth: 220
@@ -51,6 +51,19 @@ Item {
     Behavior on color { ColorAnimation { duration: 120 } }
   }
 
+  // Minimized: a short dash where the underline would be.
+  Rectangle {
+    visible: root.minimized && !root.active
+    width: Style.space(6)
+    height: Math.max(2, Style.space(2))
+    radius: height / 2
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.top: root.edgeTop ? parent.top : undefined
+    anchors.bottom: root.edgeTop ? undefined : parent.bottom
+    color: root.foreground
+    opacity: 0.5
+  }
+
   // Active/urgent indicator on the edge facing the screen border.
   Rectangle {
     width: root.active || root.urgent ? parent.width - root.pad * 2 : 0
@@ -76,17 +89,10 @@ Item {
     anchors.verticalCenter: parent.verticalCenter
     spacing: Style.space(6)
     clip: true
+    opacity: root.minimized && !root.hovered ? 0.45 : 1
 
-    Text {
-      visible: root.badge !== ""
-      anchors.verticalCenter: parent.verticalCenter
-      text: root.badge
-      color: root.textColor
-      opacity: 0.5
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.bodySmall
-      textFormat: Text.PlainText
-    }
+    Behavior on opacity { NumberAnimation { duration: 140 } }
+
 
     Item {
       width: root.iconSize
@@ -123,8 +129,7 @@ Item {
       id: title
       visible: root.showLabel && root.label !== ""
       anchors.verticalCenter: parent.verticalCenter
-      width: Math.min(implicitWidth, Style.spaceReal(root.maxWidth) - root.pad * 2 - root.iconSize - content.spacing
-        - (root.badge !== "" ? badgeMetrics.advanceWidth + content.spacing : 0))
+      width: Math.min(implicitWidth, Style.spaceReal(root.maxWidth) - root.pad * 2 - root.iconSize - content.spacing)
       text: root.label
       color: root.textColor
       opacity: root.active ? 1 : 0.65
@@ -138,12 +143,6 @@ Item {
     }
   }
 
-  TextMetrics {
-    id: badgeMetrics
-    text: root.badge
-    font.family: root.fontFamily
-    font.pixelSize: Style.font.bodySmall
-  }
 
   MouseArea {
     id: mouse
