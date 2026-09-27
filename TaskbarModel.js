@@ -54,7 +54,11 @@ var DEFAULTS = {
   agentWaitingPattern: "",
   // Inline mode: space (px, before scaling) kept free on each side of the
   // top bar's center for the clock and friends.
-  centerReserve: 260
+  centerReserve: 260,
+  // Android-style top-edge shade with calendar, clock, media and weather.
+  shade: true,
+  // Open shade height in logical pixels, before the shell spacing scale.
+  shadeHeight: 480
 }
 
 // Leading glyphs Claude Code puts in the terminal title.
@@ -106,6 +110,7 @@ function stringOr(value, fallback) {
 function normalizeSettings(entry) {
   var e = isPlainObject(entry) ? entry : {}
   var width = Number(e.maxButtonWidth)
+  var shadeHeight = Number(e.shadeHeight)
   var pinned = Array.isArray(e.pinned)
     ? e.pinned.filter(function(p) { return typeof p === "string" && p.length > 0 })
     : DEFAULTS.pinned
@@ -127,7 +132,9 @@ function normalizeSettings(entry) {
     agentNotify: boolOr(e.agentNotify, DEFAULTS.agentNotify),
     agentWorkingPattern: stringOr(e.agentWorkingPattern, ""),
     agentWaitingPattern: stringOr(e.agentWaitingPattern, ""),
-    centerReserve: isFinite(Number(e.centerReserve)) && Number(e.centerReserve) >= 0 ? Math.round(Number(e.centerReserve)) : DEFAULTS.centerReserve
+    centerReserve: isFinite(Number(e.centerReserve)) && Number(e.centerReserve) >= 0 ? Math.round(Number(e.centerReserve)) : DEFAULTS.centerReserve,
+    shade: boolOr(e.shade, DEFAULTS.shade),
+    shadeHeight: isFinite(shadeHeight) && shadeHeight >= 320 && shadeHeight <= 720 ? Math.round(shadeHeight) : DEFAULTS.shadeHeight
   }
 }
 
@@ -157,7 +164,9 @@ function isMinimized(win) {
 // Minimized windows show where they came from, so a workspace-scoped taskbar
 // only lists the ones minimized from that workspace. One with no recorded
 // origin shows on its monitor's taskbar in every workspace, so it can't get
-// lost. Other special (scratchpad) workspaces are only listed in "all" scope.
+// lost. Scratchpad windows also stay in their monitor's strip, so their menu
+// can move them back to a chosen workspace; other special workspaces are only
+// listed in "all" scope.
 function windowVisible(win, view) {
   if (!win || !view) return false
 
@@ -174,6 +183,7 @@ function windowVisible(win, view) {
   if (!isFinite(wsId)) return false
 
   if (view.scope === "all") return true
+  if (win.workspaceName === "special:scratchpad") return win.monitorName === view.monitorName
   if (wsId < 0) return false
   if (win.monitorName !== view.monitorName) return false
   if (view.scope === "monitor") return true
@@ -403,3 +413,13 @@ function unregisterWidget(w) {
   if (i !== -1) widgets.splice(i, 1)
 }
 function widgetList() { return widgets.slice() }
+
+// Top-edge shades, one per monitor. The panel IPC uses this registry to open
+// the shade on the focused monitor without reaching through Variants.
+var shades = []
+function registerShade(shade) { if (shades.indexOf(shade) === -1) shades.push(shade) }
+function unregisterShade(shade) {
+  var i = shades.indexOf(shade)
+  if (i !== -1) shades.splice(i, 1)
+}
+function shadeList() { return shades.slice() }

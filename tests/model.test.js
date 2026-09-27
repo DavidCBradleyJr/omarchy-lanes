@@ -7,6 +7,8 @@ const assert = require("assert")
 // and evaluate it as a plain script.
 const src = fs.readFileSync(path.join(__dirname, "..", "TaskbarModel.js"), "utf8").replace(".pragma library", "")
 const M = new Function(src + "; return { PLUGIN_ID, MINIMIZED_WORKSPACE, DEFAULTS, findEntry, normalizeSettings, settingsFromText, windowVisible, groupFor, displayOrder, groupStarts, cycleIndex, nthIndex, appMatches, workspaceLabel, normalizeAddress, dispatch, parseState, stateWith, stateWithout, historyWith, historyWithout, entryFromText, agentState, agentLabel, finishedAgents, nextWaitingIndex, agentCounts }")()
+const shadeSrc = fs.readFileSync(path.join(__dirname, "..", "ShadeModel.js"), "utf8").replace(".pragma library", "")
+const S = new Function(shadeSrc + "; return { TILE_SIZE, RADAR_MIN_ZOOM, RADAR_MAX_ZOOM, dateKey, monthGrid, stepMonth, clamp, formatDuration, weatherIcon, weatherLabel, radarFrames, mercatorPoint, radarTiles, radarMarker }")()
 
 let passed = 0
 function test(name, fn) { fn(); passed++; console.log("ok -", name) }
@@ -90,6 +92,17 @@ test("minimized windows show where they came from", () => {
   assert.ok(M.windowVisible(min(null, "HDMI-A-1"), view("all")))
 })
 
+test("scratchpad windows remain accessible on their monitor", () => {
+  const scratchpad = { workspaceId: -98, workspaceName: "special:scratchpad", monitorName: "DP-1", origin: null }
+  const otherSpecial = { workspaceId: -97, workspaceName: "special:other", monitorName: "DP-1", origin: null }
+  const view = (scope, monitorName = "DP-1") => ({ scope, monitorName, activeWorkspaceId: 2, activeWorkspaceName: "2" })
+  assert.ok(M.windowVisible(scratchpad, view("workspace")))
+  assert.ok(M.windowVisible(scratchpad, view("monitor")))
+  assert.ok(!M.windowVisible(scratchpad, view("workspace", "HDMI-A-1")))
+  assert.ok(M.windowVisible(scratchpad, view("all", "HDMI-A-1")))
+  assert.ok(!M.windowVisible(otherSpecial, view("workspace")))
+})
+
 test("grouping by workspace", () => {
   assert.deepStrictEqual(M.groupFor({ workspaceId: 3, workspaceName: "3" }), { key: 3, label: "3" })
   assert.deepStrictEqual(M.groupFor({ workspaceId: 10, workspaceName: "10" }), { key: 10, label: "0" })
@@ -160,6 +173,58 @@ test("bottom bar and auto-hide settings", () => {
   assert.strictEqual(M.normalizeSettings({ mode: "lanes", bottomBar: "show" }).bottomBar, "show")
   assert.strictEqual(M.normalizeSettings({ bottomBar: "sometimes" }).bottomBar, "show")
   assert.strictEqual(M.normalizeSettings({ autoHide: true }).autoHide, true)
+})
+
+test("top shade settings", () => {
+  const defaults = M.normalizeSettings(null)
+  assert.strictEqual(defaults.shade, true)
+  assert.strictEqual(defaults.shadeHeight, 480)
+  assert.strictEqual(M.normalizeSettings({ shade: false, shadeHeight: 620 }).shade, false)
+  assert.strictEqual(M.normalizeSettings({ shade: false, shadeHeight: 620 }).shadeHeight, 620)
+  assert.strictEqual(M.normalizeSettings({ shadeHeight: 120 }).shadeHeight, 480)
+  assert.strictEqual(M.normalizeSettings({ shadeHeight: 900 }).shadeHeight, 480)
+})
+
+test("shade calendar produces a fixed six-week grid", () => {
+  const cells = S.monthGrid(2026, 8, 1, "2026-09-21")
+  assert.strictEqual(cells.length, 42)
+  assert.strictEqual(cells[0].key, "2026-08-31")
+  assert.strictEqual(cells.filter(cell => cell.today).length, 1)
+  assert.strictEqual(cells.find(cell => cell.today).day, 21)
+  assert.deepStrictEqual(S.stepMonth(2026, 11, 1), { year: 2027, month: 0 })
+})
+
+test("shade media and radar helpers", () => {
+  assert.strictEqual(S.RADAR_MIN_ZOOM, 4)
+  assert.strictEqual(S.RADAR_MAX_ZOOM, 7)
+  assert.strictEqual(S.formatDuration(0), "0:00")
+  assert.strictEqual(S.formatDuration(367), "6:07")
+  assert.strictEqual(S.weatherLabel(0), "Clear")
+  assert.strictEqual(S.weatherLabel(95), "Thunderstorms")
+
+  const tiles = S.radarTiles(40.7128, -74.006, 6, 4, 3)
+  const marker = S.radarMarker(40.7128, -74.006, 6, 4, 3)
+  assert.strictEqual(tiles.length, 12)
+  assert.ok(marker.x >= 0 && marker.x <= 4 * S.TILE_SIZE)
+  assert.ok(marker.y >= 0 && marker.y <= 3 * S.TILE_SIZE)
+})
+
+test("radar history is normalized, ordered, and limited", () => {
+  const data = { radar: { past: [
+    { time: 300, path: "/three" },
+    { time: 100, path: "/one" },
+    { time: 200, path: "/two" },
+    { time: "bad", path: "/bad-time" },
+    { time: 400 },
+    null
+  ] } }
+  assert.deepStrictEqual(S.radarFrames(data, 2), [
+    { time: 200, path: "/two" },
+    { time: 300, path: "/three" }
+  ])
+  assert.deepStrictEqual(S.radarFrames(data, 20).map(frame => frame.time), [100, 200, 300])
+  assert.deepStrictEqual(S.radarFrames(null, 10), [])
+  assert.deepStrictEqual(S.radarFrames({ radar: { past: "invalid" } }, 10), [])
 })
 
 test("agent state from titles", () => {

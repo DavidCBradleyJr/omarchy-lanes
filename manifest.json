@@ -4,7 +4,7 @@
   "name": "Lanes",
   "version": "0.3.0",
   "author": "David Bradley",
-  "description": "A workspace-first taskbar for the Omarchy shell: windows grouped into lanes by workspace, live Codex and Claude Code agent status (model, task, one click to jump there), minimize, a Hyprland window menu, and an optional top-bar widget.",
+  "description": "A workspace-first taskbar for the Omarchy shell with live agent status, minimize, a top-bar widget, and a top-edge shade for calendar, clock, media, weather, and radar.",
   "homepage": "https://github.com/DavidCBradleyJr/omarchy-lanes",
   "kinds": [
     "panel",
@@ -52,6 +52,22 @@
         "label": "Auto-hide bottom bar",
         "defaultValue": false,
         "description": "Slide the bottom bar away until the pointer reaches the screen edge. Ctrl+Alt+H toggles it."
+      },
+      {
+        "key": "shade",
+        "type": "boolean",
+        "label": "Top-edge shade",
+        "defaultValue": true,
+        "description": "Hover at the top edge to reveal calendar, clock, media, weather, and radar tabs."
+      },
+      {
+        "key": "shadeHeight",
+        "type": "integer",
+        "label": "Shade height",
+        "min": 320,
+        "max": 720,
+        "step": 20,
+        "defaultValue": 480
       },
       {
         "key": "scope",

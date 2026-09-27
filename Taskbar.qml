@@ -59,6 +59,48 @@ Item {
   // Ctrl+Alt+A: jump to the next agent waiting for input.
   function nextAgent() { return core.focusNextWaiting() ? "ok" : "none" }
 
+  // Open/close the top-edge shade on the focused monitor. The optional tab
+  // index is calendar=0, clock=1, music=2, weather=3.
+  function focusedShade() {
+    var monitor = Hyprland.focusedMonitor
+    var shades = Model.shadeList()
+    for (var i = 0; i < shades.length; i++) {
+      if (!monitor || shades[i].hyprMonitor === monitor) return shades[i]
+    }
+    return null
+  }
+
+  function shadeTab(shade, tab) {
+    if (!shade || tab === undefined || String(tab) === "") return
+    var index = Number(tab)
+    if (isFinite(index) && index >= 0 && index < 4) shade.selectedTab = index
+  }
+
+  function showShade(tab) {
+    var shade = focusedShade()
+    if (!shade) return "none"
+    shadeTab(shade, tab)
+    shade.showShade(shade.selectedTab)
+    return "open"
+  }
+
+  function hideShade() {
+    var shade = focusedShade()
+    if (!shade) return "none"
+    shade.closeShade()
+    return "closed"
+  }
+
+  function toggleShade(tab) {
+    var shade = focusedShade()
+    if (!shade) return "none"
+    shadeTab(shade, tab)
+    var closing = shade.opened && shade.heldOpen
+    if (closing) shade.closeShade()
+    else shade.showShade(shade.selectedTab)
+    return closing ? "closed" : "open"
+  }
+
   // Toggle the top-bar widget's agent list: "working", "waiting" or
   // "minimized". Opens on the focused monitor's widget.
   function agents(filter) {
@@ -153,6 +195,21 @@ Item {
           Behavior on x { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
           Behavior on opacity { NumberAnimation { duration: 120 } }
         }
+      }
+    }
+  }
+
+  // One Android-style shade per output. It lives above the Omarchy bar and
+  // leaves only a tiny top-edge trigger visible while closed.
+  Variants {
+    model: root.settings.shade ? Quickshell.screens : []
+
+    delegate: Component {
+      TopShade {
+        required property var modelData
+        screen: modelData
+        settings: root.settings
+        hyprMonitor: Hyprland.monitorFor(modelData)
       }
     }
   }

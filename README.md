@@ -19,9 +19,13 @@ corner rounding and bar sizing and restyles itself when you switch themes.
 - **Top-bar widget.** A compact `✳ 2  ◐ 1  󰖰 3` summary (agents waiting, agents
   working, minimized windows; `✳ 0  ◐ 0` when idle) that opens a jump list. Or put the whole lanes strip in
   the top bar instead of a bottom bar
+- **Top-edge shade.** Hover at the very top of any monitor for a slide-down
+  calendar, live clock, MPRIS music controls (including Spotify), and weather
+  with a live RainViewer radar map
 - **Auto-hide** for the bottom bar, toggled with Ctrl+Alt+H and remembered
 - **Right-click menu:** minimize, floating, pin, fullscreen, move to
-  workspace 1–0, move to the next monitor, close. Click outside it to dismiss
+  workspace 1–0, move to the next monitor, add to the Super+S scratchpad,
+  or remove from it into a chosen workspace. Click outside it to dismiss
 - **Keyboard:** Ctrl+Alt+1…0 acts on the Nth window, Ctrl+Alt+M opens its menu
 - App icons and titles, with the focused window underlined in the theme accent
 - Optional pinned launchers: focus the running app, or launch it
@@ -33,9 +37,10 @@ corner rounding and bar sizing and restyles itself when you switch themes.
 Requires an Omarchy release with the Quickshell-based `omarchy-shell` (tested on
 Omarchy 4.0.4, Quickshell 0.3.1, Hyprland 0.56 with the Lua dispatcher API).
 
-No external dependencies. Pinned launchers start apps with `uwsm-app` and
-`gtk-launch`, and the agent helper uses `python3` and `hyprctl`. All of these ship
-with Omarchy.
+No additional packages are required. Pinned launchers use `uwsm-app` and
+`gtk-launch`; the agent helper uses `python3` and `hyprctl`; the optional weather
+tab uses `curl`. These tools ship with Omarchy. Weather and radar also need
+access to the services named in [Top-edge shade](#top-edge-shade).
 
 ```bash
 omarchy plugin add https://github.com/DavidCBradleyJr/omarchy-lanes.git --enable
@@ -56,8 +61,10 @@ omarchy plugin remove davidcbradleyjr.lanes
 If you set up the keyboard shortcuts, also delete the `pcall(require, "hypr.lanes")`
 line from `~/.config/hypr/hyprland.lua` and remove `~/.config/hypr/lanes.lua`.
 
-Lanes never edits your configuration files. At runtime it only writes minimize
-records to `$XDG_RUNTIME_DIR/hyprland-minimizer/` (temporary, cleared at logout).
+Installation does not edit your configuration files. At runtime Lanes writes
+minimize records to `$XDG_RUNTIME_DIR/hyprland-minimizer/` and an agent snapshot
+to `$XDG_RUNTIME_DIR/omarchy-lanes/` (both temporary). Changing Lanes settings
+through the shell updates its own entry in `~/.config/omarchy/shell.json`.
 
 ## Configure
 
@@ -73,6 +80,8 @@ key is optional, and the Setup panel offers a form for them:
     "mode": "summary",
     "bottomBar": "show",
     "autoHide": false,
+    "shade": true,
+    "shadeHeight": 480,
     "agents": true,
     "agentNotify": true,
     "position": "bottom",
@@ -93,6 +102,8 @@ key is optional, and the Setup panel offers a form for them:
 | `mode` | `summary`, `lanes` | `summary` | Top-bar widget: counters with a jump list, or the whole strip inline |
 | `bottomBar` | `show`, `off` | `show` (`off` in lanes mode) | The bottom bar |
 | `autoHide` | bool | `false` | Slide the bottom bar away until the pointer reaches the edge. Ctrl+Alt+H toggles it |
+| `shade` | bool | `true` | Hover at the top edge for the calendar, clock, music, and weather shade |
+| `shadeHeight` | 320–720 px | `480` | Open height of the top-edge shade |
 | `agents` | bool | `true` | Agent badges and counters |
 | `agentNotify` | bool | `true` | Notify when an agent finishes while you're looking elsewhere |
 | `agentWorkingPattern`, `agentWaitingPattern` | regex string | – | Extra title patterns for other agents |
@@ -107,8 +118,9 @@ key is optional, and the Setup panel offers a form for them:
 | `transparent` | bool | `false` | No background behind the strip |
 | `pinned` | desktop entry ids | `[]` | Launchers, e.g. `firefox`, `org.gnome.Nautilus` |
 
-Windows on special (scratchpad) workspaces are only listed with `scope: "all"`.
-Minimized windows show on the taskbar of the workspace they were minimized from.
+Scratchpad windows stay listed on their monitor in every scope. Right-click
+one, choose **Remove from scratchpad**, then pick workspace 1–0. Minimized
+windows show on the taskbar of the workspace they were minimized from.
 
 ## Mouse and keyboard
 
@@ -195,6 +207,26 @@ to icons only when titles won't fit. It has the most room in the left section:
 omarchy bar move davidcbradleyjr.lanes --section left
 ```
 
+## Top-edge shade
+
+Move the pointer to the top 3 pixels of a monitor and pause briefly. The shade
+slides down and remains open while the pointer is inside it; move away to dismiss
+it, or click the handle at the bottom. The four tabs are:
+
+| Tab | Content |
+|---|---|
+| Calendar | Locale-aware month grid with month navigation and a Today button |
+| Clock | Live digital and analog local clock |
+| Music | The active MPRIS player, album art, seek bar, transport controls, and source switching; Spotify works through its standard MPRIS interface |
+| Weather | Current conditions, five-day forecast, and precipitation radar centered on the Omarchy weather location, with zoom and a ten-frame timelapse |
+
+Weather uses the location configured in Omarchy's weather panel. If none is set,
+it uses the same IP-based `wttr.in` lookup as Omarchy. Forecast data comes from
+Open-Meteo; the map uses Esri dark canvas tiles and RainViewer radar tiles. Use
+the `+`/`-` controls or the mouse wheel to zoom through RainViewer's supported
+levels 4-7. The ten recent radar frames preload before the timeline's playback
+control becomes available, keeping the animation smooth once it starts.
+
 ## Minimize convention
 
 Minimized windows are moved to `special:minimized`, and their origin is recorded in
@@ -209,6 +241,9 @@ omarchy-shell shell call davidcbradleyjr.lanes focusIndex 3
 omarchy-shell shell call davidcbradleyjr.lanes menu ""
 omarchy-shell shell call davidcbradleyjr.lanes nextAgent ""
 omarchy-shell shell call davidcbradleyjr.lanes agents working   # or waiting, minimized
+omarchy-shell shell call davidcbradleyjr.lanes showShade 3      # weather tab
+omarchy-shell shell call davidcbradleyjr.lanes hideShade ""
+omarchy-shell shell call davidcbradleyjr.lanes toggleShade 0
 omarchy-shell shell call davidcbradleyjr.lanes toggleAutoHide ""
 omarchy-shell shell call davidcbradleyjr.lanes toggleVisible ""
 ```
@@ -235,6 +270,8 @@ were already loaded keep their old code. Shell logs:
 | `manifest.json` | Plugin manifest (`panel` + `bar-widget`, settings schema) |
 | `Taskbar.qml` | Bottom bar: per-monitor windows, auto-hide, IPC |
 | `BarWidget.qml` | Top-bar widget: summary counters and popup, or inline lanes |
+| `TopShade.qml` | Per-monitor hover shade and tab navigation |
+| `ShadeCalendar.qml`, `ShadeClock.qml`, `ShadeMedia.qml`, `ShadeWeather.qml` | Shade views |
 | `Actions.qml` | Shared core: settings, window list, agents, minimize, actions |
 | `LaneStrip.qml` | The lanes strip, used by the bottom bar and inline mode |
 | `bin/lanes-agents` | Agent helper: Codex / Claude Code sessions from their logs |

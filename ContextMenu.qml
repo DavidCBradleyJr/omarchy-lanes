@@ -21,6 +21,8 @@ PopupCard {
   readonly property bool fullscreen: !!(ipc && ipc.fullscreen)
   readonly property bool minimized: !!(actions && toplevel && actions.isMinimized(toplevel))
   readonly property string currentWorkspace: toplevel && toplevel.workspace ? String(toplevel.workspace.name) : ""
+  readonly property bool onScratchpad: currentWorkspace === "special:scratchpad"
+  property bool scratchpadPickerOpen: false
 
   readonly property int rowHeight: Style.spacing.popupRowHeight
   readonly property int menuWidth: Style.space(230)
@@ -39,6 +41,7 @@ PopupCard {
 
   function openFor(item, t) {
     menu.toplevel = t
+    menu.scratchpadPickerOpen = false
     menu.anchorItem = item
     Hyprland.refreshToplevels()   // fresh floating/pinned/fullscreen state
     menu.open = true
@@ -111,15 +114,28 @@ PopupCard {
       onTriggered: menu.run(menu.actions.moveToNextMonitor)
     }
 
-    // Move to workspace: 1-9, 0
+    MenuRow {
+      visible: menu.onScratchpad
+      text: "Remove from scratchpad"
+      glyph: "󰘔"
+      checked: menu.scratchpadPickerOpen
+      onTriggered: {
+        menu.scratchpadPickerOpen = !menu.scratchpadPickerOpen
+        Qt.callLater(function() { menu.anchor.updateAnchor() })
+      }
+    }
+
+    // Move to workspace: 1-9, 0. For scratchpad windows, these are the
+    // destination choices revealed by "Remove from scratchpad".
     Item {
+      visible: !menu.onScratchpad || menu.scratchpadPickerOpen
       width: parent.width
-      height: menu.rowHeight + Style.space(18)
+      height: visible ? menu.rowHeight + Style.space(18) : 0
 
       Text {
         x: Style.space(8)
         y: Style.space(4)
-        text: "Move to workspace"
+        text: menu.onScratchpad ? "Choose destination workspace" : "Move to workspace"
         color: Color.popups.text
         opacity: 0.55
         font.family: Style.font.family
@@ -166,6 +182,14 @@ PopupCard {
           }
         }
       }
+    }
+
+    MenuRow {
+      visible: !menu.onScratchpad
+      text: "Add to scratchpad"
+      glyph: "󰘓"
+      enabled: !menu.minimized
+      onTriggered: menu.run(function(t) { menu.actions.moveToWorkspace(t, "special:scratchpad") })
     }
 
     Rectangle {
