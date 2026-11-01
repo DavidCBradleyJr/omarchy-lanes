@@ -269,9 +269,17 @@ function workspaceLabel(id) {
 
 // ---- agents
 
+// Agent state is read on every title change (spinner frames included), so
+// keep compiled patterns instead of rebuilding them each time.
+var patternCache = {}
+
 function compilePattern(source) {
   if (!source) return null
-  try { return new RegExp(source) } catch (e) { return null }
+  if (Object.prototype.hasOwnProperty.call(patternCache, source)) return patternCache[source]
+  var re = null
+  try { re = new RegExp(source) } catch (e) { re = null }
+  patternCache[source] = re
+  return re
 }
 
 // "working", "waiting" or "" from a window title. Custom patterns win over

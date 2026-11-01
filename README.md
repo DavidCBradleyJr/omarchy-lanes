@@ -211,7 +211,12 @@ omarchy bar move davidcbradleyjr.lanes --section left
 
 Move the pointer to the top 3 pixels of a monitor and pause briefly. The shade
 slides down and remains open while the pointer is inside it; move away to dismiss
-it, or click the handle at the bottom. The four tabs are:
+it, or click the handle at the bottom. While a fullscreen window is on the
+monitor's workspace the top edge belongs to that window: hovering does nothing and
+the peek strip is hidden, though the `showShade`/`toggleShade` IPC calls still open
+it on purpose. The shade uses your theme's background, text, border and accent
+colors, and its tabs pause their timers and network refreshes while it's closed.
+The four tabs are:
 
 | Tab | Content |
 |---|---|

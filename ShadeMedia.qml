@@ -12,6 +12,8 @@ Item {
   property color surfaceColor: Color.popups.background
   property string preferredKey: ""
   property int positionTick: 0
+  // False while the shade is put away: stop polling the seek position.
+  property bool shown: true
   readonly property var players: Mpris.players ? Mpris.players.values : []
   readonly property var activePlayer: selectPlayer()
   readonly property real currentPosition: {
@@ -47,7 +49,8 @@ Item {
   Timer {
     interval: 1000
     repeat: true
-    running: root.activePlayer !== null
+    running: root.shown && root.activePlayer !== null
+    triggeredOnStart: true
     onTriggered: root.positionTick++
   }
 

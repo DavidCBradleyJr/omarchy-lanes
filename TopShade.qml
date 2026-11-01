@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Wayland
+import Quickshell.Hyprland
 import qs.Commons
 import "TaskbarModel.js" as Model
 
@@ -15,16 +16,38 @@ PanelWindow {
   property int displayedTab: 0
   property int transitionDirection: 1
   property date now: shadeClock.date
-  readonly property color shadeBackground: "#10111a"
-  readonly property color shadeSurface: "#171925"
-  readonly property color shadeBorder: "#30334b"
-  readonly property color shadeText: "#c7c9de"
-  readonly property color shadeMuted: "#747891"
-  readonly property color shadeAccent: "#858cff"
+  // Neutrals and the accent follow the Omarchy theme; cyan and amber are the
+  // shade's own secondary accents.
+  readonly property color shadeBackground: Color.popups.background
+  readonly property color shadeSurface: Qt.tint(Color.popups.background, Util.alpha(Color.popups.text, 0.05))
+  readonly property color shadeHover: Qt.tint(Color.popups.background, Util.alpha(Color.popups.text, 0.08))
+  readonly property color shadeBorder: Color.popups.border
+  readonly property color shadeText: Color.popups.text
+  readonly property color shadeMuted: Util.alpha(Color.popups.text, 0.55)
+  readonly property color shadeAccent: Color.accent
   readonly property color shadeCyan: "#55d6d2"
   readonly property color shadeAmber: "#d9b85f"
   readonly property bool opened: hoverOpen || heldOpen
   readonly property int peek: Math.max(3, Style.space(3))
+  // A fullscreen window on this monitor owns the top edge: no hover trigger,
+  // no visible peek strip, and the top pixels go to the app. The keyboard /
+  // IPC commands can still open the shade on purpose. Reads the Wayland
+  // toplevel state, which is live and is only set for real fullscreen
+  // (Hyprland's "maximize" fullscreen mode keeps the bar, so it keeps the
+  // shade too).
+  readonly property bool fullscreenActive: {
+    var monitor = root.hyprMonitor
+    var workspace = monitor ? monitor.activeWorkspace : null
+    if (!workspace) return false
+    var all = Hyprland.toplevels.values
+    for (var i = 0; i < all.length; i++) {
+      var t = all[i]
+      if (t.workspace !== workspace) continue
+      if (t.wayland ? t.wayland.fullscreen : (t.lastIpcObject && t.lastIpcObject.fullscreen === 2)) return true
+    }
+    return false
+  }
+  readonly property int edge: fullscreenActive ? 0 : peek
   readonly property int desiredHeight: settings ? Style.space(settings.shadeHeight) : Style.space(480)
   property real reveal: opened ? 1 : 0
   readonly property var tabs: [
@@ -75,6 +98,10 @@ PanelWindow {
 
   onSelectedTabChanged: transitionToTab(selectedTab)
 
+  // Going fullscreen while the shade is out (say, a video's fullscreen
+  // button under the pointer) puts it away.
+  onFullscreenActiveChanged: if (fullscreenActive) closeShade()
+
   Component.onCompleted: Model.registerShade(root)
   Component.onDestruction: Model.unregisterShade(root)
 
@@ -100,7 +127,7 @@ PanelWindow {
   Item {
     id: interactionRegion
     width: root.width
-    height: root.peek + Math.round((root.height - root.peek) * root.reveal)
+    height: root.edge + Math.round((root.height - root.edge) * root.reveal)
   }
 
   SystemClock {
@@ -116,7 +143,7 @@ PanelWindow {
     onHoveredChanged: {
       if (hovered) {
         closeDelay.stop()
-        if (!root.opened) openDelay.restart()
+        if (!root.opened) { if (!root.fullscreenActive) openDelay.restart() }
         else root.hoverOpen = true
       } else {
         openDelay.stop()
@@ -128,7 +155,7 @@ PanelWindow {
   Timer {
     id: openDelay
     interval: 170
-    onTriggered: root.hoverOpen = true
+    onTriggered: if (!root.fullscreenActive) root.hoverOpen = true
   }
 
   Timer {
@@ -140,7 +167,8 @@ PanelWindow {
   Rectangle {
     id: shadeBody
     x: 0
-    y: -Math.round((height - root.peek) * (1 - root.reveal))
+    y: -Math.round((height - root.edge) * (1 - root.reveal))
+    visible: root.edge > 0 || root.reveal > 0
     width: parent.width
     height: parent.height
     color: root.shadeBackground
@@ -231,7 +259,7 @@ PanelWindow {
               width: Style.space(132)
               height: Style.space(38)
               radius: 0
-              color: root.selectedTab === index ? root.shadeSurface : (tabMouse.containsMouse ? "#1c1e2d" : "transparent")
+              color: root.selectedTab === index ? root.shadeSurface : (tabMouse.containsMouse ? root.shadeHover : "transparent")
               border.width: Math.max(1, Style.space(1))
               border.color: root.selectedTab === index ? root.shadeAccent : root.shadeBorder
 
@@ -306,6 +334,8 @@ PanelWindow {
         id: contentArea
         width: parent.width
         height: parent.height - header.height - handle.height - Style.space(1)
+        // Nothing to draw while the shade is put away.
+        visible: root.reveal > 0
 
         Item {
           id: pageViewport
@@ -461,21 +491,21 @@ PanelWindow {
 
   Component {
     id: calendarComponent
-    ShadeCalendar { foreground: root.shadeText; accent: root.shadeAmber; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
+    ShadeCalendar { now: root.now; foreground: root.shadeText; accent: root.shadeAmber; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
   }
 
   Component {
     id: clockComponent
-    ShadeClock { foreground: root.shadeText; accent: root.shadeCyan; borderColor: root.shadeBorder }
+    ShadeClock { shown: root.opened; foreground: root.shadeText; accent: root.shadeCyan; borderColor: root.shadeBorder }
   }
 
   Component {
     id: mediaComponent
-    ShadeMedia { foreground: root.shadeText; accent: root.shadeAccent; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
+    ShadeMedia { shown: root.opened; foreground: root.shadeText; accent: root.shadeAccent; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
   }
 
   Component {
     id: weatherComponent
-    ShadeWeather { foreground: root.shadeText; accent: root.shadeCyan; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
+    ShadeWeather { shown: root.opened; foreground: root.shadeText; accent: root.shadeCyan; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
   }
 }

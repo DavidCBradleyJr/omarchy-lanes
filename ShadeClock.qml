@@ -9,10 +9,15 @@ Item {
   property color accent: Color.accent
   property color borderColor: Color.popups.border
   property date now: clock.date
+  // False while the shade is put away: stop the per-second tick and repaint.
+  property bool shown: true
+
+  onShownChanged: if (shown) face.requestPaint()
 
   SystemClock {
     id: clock
     precision: SystemClock.Seconds
+    enabled: root.shown
     onDateChanged: face.requestPaint()
   }
 

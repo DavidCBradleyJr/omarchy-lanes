@@ -21,6 +21,11 @@ Item {
   property bool radarPlaying: false
   property int radarZoom: 6
   property int radarSettledTiles: 0
+  // False while the shade is put away: pause the radar loop and the
+  // periodic refresh, then catch up on the next open if the data is stale.
+  property bool shown: true
+  property real lastRefresh: 0
+  readonly property int refreshInterval: 15 * 60 * 1000
   readonly property bool hasCoordinates: isFinite(latitude) && isFinite(longitude)
   readonly property bool imperial: Qt.locale().measurementSystem === Locale.ImperialUSSystem
   readonly property var current: report && report.current ? report.current : null
@@ -78,6 +83,7 @@ Item {
       + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,is_day"
       + "&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=5&timezone=auto" + units]
     forecast.running = true
+    lastRefresh = Date.now()
     if (!radarIndex.running) radarIndex.running = true
   }
 
@@ -90,6 +96,8 @@ Item {
     if (radarFrames.length < 1) return
     radarFrameIndex = (radarFrameIndex + delta + radarFrames.length) % radarFrames.length
   }
+
+  onShownChanged: if (shown && hasCoordinates && Date.now() - lastRefresh > refreshInterval) refresh()
 
   FileView {
     id: locationFile
@@ -152,14 +160,14 @@ Item {
 
   Timer {
     interval: 900
-    running: root.radarPlaying && root.radarFrames.length > 1
+    running: root.shown && root.radarPlaying && root.radarFrames.length > 1
     repeat: true
     onTriggered: root.stepRadar(1)
   }
 
   Timer {
-    interval: 15 * 60 * 1000
-    running: true
+    interval: root.refreshInterval
+    running: root.shown
     repeat: true
     onTriggered: root.refresh()
   }
