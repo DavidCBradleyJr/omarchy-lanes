@@ -140,6 +140,28 @@ def hypr_clients():
         return []
 
 
+class Windows:
+    """Hyprland clients, fetched at most once per pass and only on first use.
+
+    `hyprctl` is a subprocess; most passes (no claude process, no active
+    Codex session) never need a window, so they never pay for it.
+    """
+
+    def __init__(self):
+        self._clients = None
+        self._by_pid = None
+
+    def clients(self):
+        if self._clients is None:
+            self._clients = hypr_clients()
+        return self._clients
+
+    def by_pid(self):
+        if self._by_pid is None:
+            self._by_pid = {c.get("pid"): c for c in self.clients() if c.get("pid")}
+        return self._by_pid
+
+
 # ---------------------------------------------------------------- codex
 
 def codex_thread_names():
@@ -321,12 +343,13 @@ class CodexLog:
 CODEX_LOGS = {}
 
 
-def codex_sessions(now, procs, clients, client_by_pid):
-    names = codex_thread_names()
-    desktop = next((c for c in clients if str(c.get("class", "")).lower() in ("chatgpt", "codex")), None)
+def codex_sessions(now, procs, windows):
+    rollouts = codex_recent_rollouts(now)
+    # Thread names are only needed once there is a rollout to title.
+    names = codex_thread_names() if rollouts else {}
     sessions = []
     live = set()
-    for path, mtime in codex_recent_rollouts(now):
+    for path, mtime in rollouts:
         live.add(path)
         log = CODEX_LOGS.get(path)
         if log is None:
@@ -348,14 +371,17 @@ def codex_sessions(now, procs, clients, client_by_pid):
 
         # Which window: the desktop app, or the terminal a CLI runs in.
         address, link, app = "", "", "Codex"
-        if "desktop" in originator.lower() and desktop:
+        desktop = None
+        if "desktop" in originator.lower():
+            desktop = next((c for c in windows.clients() if str(c.get("class", "")).lower() in ("chatgpt", "codex")), None)
+        if desktop:
             address = desktop.get("address", "")
             link = "codex://threads/" + sid if sid else ""
             app = "Codex app"
         else:
             for pid, (comm, _ppid) in procs.items():
                 if comm == "codex" and proc_cwd(pid) == cwd:
-                    client = window_for(pid, procs, client_by_pid)
+                    client = window_for(pid, procs, windows.by_pid())
                     if client:
                         address = client.get("address", "")
                         break
@@ -381,6 +407,10 @@ def codex_sessions(now, procs, clients, client_by_pid):
 
 
 # ---------------------------------------------------------------- claude
+
+# path -> ((mtime, size), info). Session logs are re-read only when they
+# change; entries for logs no longer listed are dropped each pass.
+CLAUDE_INFO = {}
 
 def claude_project_dir(cwd):
     return os.path.join(CLAUDE_PROJECTS, re.sub(r"[^A-Za-z0-9]", "-", cwd))
@@ -410,27 +440,43 @@ def claude_session_info(path):
     return title, model, activity
 
 
-def claude_sessions(now, procs, clients, client_by_pid):
+def cached_claude_info(path, stamp):
+    hit = CLAUDE_INFO.get(path)
+    if hit and hit[0] == stamp:
+        return hit[1]
+    info = claude_session_info(path)
+    CLAUDE_INFO[path] = (stamp, info)
+    return info
+
+
+def claude_sessions(now, procs, windows):
     # One entry per terminal window running claude (the outermost claude
     # process in that window; tool subprocesses can share the name).
     by_window = {}
     for pid, (comm, ppid) in procs.items():
         if comm != "claude" or procs.get(ppid, ("",))[0] == "claude":
             continue
-        client = window_for(pid, procs, client_by_pid)
+        client = window_for(pid, procs, windows.by_pid())
         if client and client.get("address") not in by_window:
             by_window[client["address"]] = (pid, client)
 
     claimed = set()
+    seen = set()
     sessions = []
     for address, (pid, client) in by_window.items():
         cwd = proc_cwd(pid)
         folder = claude_project_dir(cwd)
         try:
-            files = [(e.path, e.stat().st_mtime) for e in os.scandir(folder) if e.name.endswith(".jsonl")]
+            files = []
+            for e in os.scandir(folder):
+                if e.name.endswith(".jsonl"):
+                    st = e.stat()
+                    files.append((e.path, st.st_mtime, st.st_size))
         except OSError:
             files = []
         files = sorted((f for f in files if now - f[1] < CLAUDE_RECENT), key=lambda f: -f[1])
+        stamps = {p: (m, z) for p, m, z in files}
+        seen.update(stamps)
 
         window_title = str(client.get("title") or "")
         wanted = strip_glyph(window_title)
@@ -438,19 +484,19 @@ def claude_sessions(now, procs, clients, client_by_pid):
         # Several sessions can share a folder; the window title is the
         # session's AI title, which tells them apart.
         infos = {}
-        for path, mtime in files[:12]:
+        for path, _mtime, _size in files[:12]:
             if path in claimed:
                 continue
-            infos[path] = claude_session_info(path)
+            infos[path] = cached_claude_info(path, stamps[path])
             if infos[path][0] and infos[path][0] == wanted:
                 chosen = path
                 break
         if not chosen:
-            chosen = next((p for p, _m in files if p not in claimed), None)
+            chosen = next((p for p, _m, _z in files if p not in claimed), None)
         if not chosen:
             continue
         claimed.add(chosen)
-        title, model, activity = infos.get(chosen) or claude_session_info(chosen)
+        title, model, activity = infos.get(chosen) or cached_claude_info(chosen, stamps[chosen])
 
         if WAITING_RE.match(window_title):
             state = "waiting"
@@ -472,8 +518,11 @@ def claude_sessions(now, procs, clients, client_by_pid):
             "cwd": cwd,
             "address": address,
             "link": "",
-            "updated": int(os.path.getmtime(chosen)),
+            "updated": int(stamps[chosen][0]),
         })
+    for path in list(CLAUDE_INFO):
+        if path not in seen:
+            del CLAUDE_INFO[path]
     return sessions
 
 
@@ -482,12 +531,11 @@ def claude_sessions(now, procs, clients, client_by_pid):
 def snapshot():
     now = time.time()
     procs = processes()
-    clients = hypr_clients()
-    client_by_pid = {c.get("pid"): c for c in clients if c.get("pid")}
+    windows = Windows()
     sessions = []
     for collect in (codex_sessions, claude_sessions):
         try:
-            sessions.extend(collect(now, procs, clients, client_by_pid))
+            sessions.extend(collect(now, procs, windows))
         except Exception as exc:  # one broken source must not hide the other
             print("lanes-agents: %s: %s" % (collect.__name__, exc), file=sys.stderr)
     sessions.sort(key=lambda s: (s["state"] != "waiting", -s["updated"]))
