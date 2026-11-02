@@ -285,8 +285,45 @@ Item {
       // Looking at it already: no need to announce.
       if (t && actions.isActive(t)) continue
       var where = t && t.workspace ? "workspace " + Model.workspaceLabel(t.workspace.id) : ""
-      Quickshell.execDetached(["notify-send", "-a", "Lanes", "-i", "dialog-information",
-        "Agent waiting for you", item.title + "  ·  " + item.app + (where ? "  ·  " + where : "")])
+      // notify-send --action prints the clicked action's key on stdout and
+      // exits (libnotify >= 0.8), so a Process per notification can read it.
+      // "default" is a click on the body; both jump to the agent.
+      var args = ["-a", "Lanes", "-i", "dialog-information",
+        "Agent waiting for you", item.title + "  ·  " + item.app + (where ? "  ·  " + where : "")]
+      notifyProcess.createObject(actions, {
+        itemKey: item.key,
+        fallbackItem: item,
+        plainCommand: ["notify-send"].concat(args),
+        command: ["notify-send", "--action=jump=Jump", "--action=default=Open", "--wait"].concat(args)
+      })
+    }
+  }
+
+  // One short-lived notify-send per notification; destroyed once it exits.
+  // The item is looked up again by key on click since it may have changed.
+  Component {
+    id: notifyProcess
+    Process {
+      id: proc
+      property string itemKey: ""
+      property var fallbackItem: null
+      // Same notification without actions, for a notify-send too old to
+      // know --action/--wait (it exits non-zero without showing anything).
+      property var plainCommand: []
+      running: true
+      stdout: StdioCollector {
+        waitForEnd: true
+        onStreamFinished: {
+          var choice = String(text || "").trim()
+          if (choice !== "jump" && choice !== "default") return
+          var found = actions.agentItems.filter(function(it) { return it.key === proc.itemKey })[0]
+          actions.openAgent(found || proc.fallbackItem)
+        }
+      }
+      onExited: function(exitCode) {
+        if (exitCode !== 0 && proc.plainCommand.length) Quickshell.execDetached(proc.plainCommand)
+        proc.destroy()
+      }
     }
   }
 
