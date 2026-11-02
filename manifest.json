@@ -37,6 +37,16 @@
         "description": "summary: agent and minimized counters with a popup. lanes: the whole strip in the top bar (turns the bottom bar off unless Bottom bar is set)."
       },
       {
+        "key": "centerReserve",
+        "type": "integer",
+        "label": "Center reserve",
+        "min": 0,
+        "defaultValue": 260,
+        "description": "Lanes mode: room kept free on each side of the top bar's center.",
+        "max": 800,
+        "step": 20
+      },
+      {
         "key": "bottomBar",
         "type": "enum",
         "label": "Bottom bar",
@@ -111,6 +121,20 @@
         "defaultValue": true
       },
       {
+        "key": "agentWorkingPattern",
+        "type": "string",
+        "label": "Working pattern",
+        "defaultValue": "",
+        "description": "Regex for window titles of other agents while they work."
+      },
+      {
+        "key": "agentWaitingPattern",
+        "type": "string",
+        "label": "Waiting pattern",
+        "defaultValue": "",
+        "description": "Regex for window titles of other agents waiting for you."
+      },
+      {
         "key": "position",
         "type": "enum",
         "label": "Bottom bar edge",
@@ -130,6 +154,13 @@
           "right"
         ],
         "defaultValue": "left"
+      },
+      {
+        "key": "transparent",
+        "type": "boolean",
+        "label": "Transparent background",
+        "defaultValue": false,
+        "description": "No background behind the strip."
       },
       {
         "key": "maxButtonWidth",
