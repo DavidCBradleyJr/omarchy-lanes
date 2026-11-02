@@ -71,7 +71,7 @@ through the shell updates its own entry in `~/.config/omarchy/shell.json`.
 Settings are inline on the plugin's entry in `~/.config/omarchy/shell.json`, which
 lives in the bar layout alongside the widget (installs from before v0.3 keep it in
 `plugins[]`; both work). The bottom bar and the widget share the one entry. Every
-key is optional, and the Setup panel offers a form for them:
+key is optional, and the Setup panel offers a form for all of them except `pinned`:
 
 ```json
 "right": [
@@ -138,6 +138,8 @@ windows show on the taskbar of the workspace they were minimized from.
 | Ctrl+Alt+A | Jump to the next agent waiting for you |
 | Ctrl+Alt+H | Toggle bottom-bar auto-hide (saved) |
 | Ctrl+Alt+B | Show / hide the taskbar |
+| Ctrl+Alt+S | Open / close the top-edge shade |
+| Ctrl+Alt+W | Open / close the shade on the weather tab |
 
 Omarchy already uses Super+number for workspaces, so the taskbar uses Ctrl+Alt.
 The bindings are in [`hypr/lanes.lua`](hypr/lanes.lua):
@@ -178,7 +180,7 @@ On the taskbar:
   means one is waiting for you. The workspace chip gets a dot too, so you can see
   "workspace 6 needs me" without looking at the windows
 - When an agent finishes and you aren't looking at its window, you get a desktop
-  notification
+  notification. Click it (or its **Jump** button) to go straight to that agent
 - In the top bar, `✳` counts agents waiting for you and `◐` counts agents working.
   Click either one for a list showing each agent's app, model, task and current step.
   Click a row to jump there: the Codex app opens that exact thread, and a terminal
@@ -211,7 +213,8 @@ omarchy bar move davidcbradleyjr.lanes --section left
 
 Move the pointer to the top 3 pixels of a monitor and pause briefly. The shade
 slides down and remains open while the pointer is inside it; move away to dismiss
-it, or click the handle at the bottom. While a fullscreen window is on the
+it, click the handle at the bottom, or click into it and press Esc. Ctrl+Alt+S
+toggles it from the keyboard. While a fullscreen window is on the
 monitor's workspace the top edge belongs to that window: hovering does nothing and
 the peek strip is hidden, though the `showShade`/`toggleShade` IPC calls still open
 it on purpose. The shade uses your theme's background, text, border and accent
@@ -229,7 +232,8 @@ Weather uses the location configured in Omarchy's weather panel. If none is set,
 it uses the same IP-based `wttr.in` lookup as Omarchy. Forecast data comes from
 Open-Meteo; the map uses Esri dark canvas tiles and RainViewer radar tiles. Use
 the `+`/`-` controls or the mouse wheel to zoom through RainViewer's supported
-levels 4-7. The ten recent radar frames preload before the timeline's playback
+levels 4-7. Every monitor's shade shares one copy of the weather data, fetched
+the first time you open the weather tab and refreshed while it's on screen. The ten recent radar frames preload before the timeline's playback
 control becomes available, keeping the animation smooth once it starts.
 
 ## Minimize convention
@@ -276,6 +280,7 @@ were already loaded keep their old code. Shell logs:
 | `Taskbar.qml` | Bottom bar: per-monitor windows, auto-hide, IPC |
 | `BarWidget.qml` | Top-bar widget: summary counters and popup, or inline lanes |
 | `TopShade.qml` | Per-monitor hover shade and tab navigation |
+| `WeatherService.qml` | Weather location, forecast and radar index, shared by every shade |
 | `ShadeCalendar.qml`, `ShadeClock.qml`, `ShadeMedia.qml`, `ShadeWeather.qml` | Shade views |
 | `Actions.qml` | Shared core: settings, window list, agents, minimize, actions |
 | `LaneStrip.qml` | The lanes strip, used by the bottom bar and inline mode |

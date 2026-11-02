@@ -1,0 +1,34 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run model tests (Node)
+        run: node tests/model.test.js
+
+      - name: Run agent tests (Python)
+        run: python3 tests/test_agents.py
+
+      - name: Check manifest.json is valid JSON
+        run: python3 -m json.tool manifest.json > /dev/null
