@@ -47,18 +47,43 @@ BarWidget {
     var w = root.QsWindow.window
     if (!w || root.mode !== "lanes") { root.budget = Infinity; return }
     var half = w.width / 2
-    var reserve = Style.space(core.settings.centerReserve)
+    var reserve = root.reserve
     var p = root.mapToItem(null, 0, 0)
     var leftSide = p.x + root.width / 2 < half
     var avail = leftSide ? half - reserve - p.x : p.x + root.width - (half + reserve)
     root.budget = Math.max(Style.space(60), Math.floor(avail))
   }
 
-  onWidthChanged: budgetTimer.restart()
+  // Event-driven recompute. When a sibling widget grows or shrinks, the bar
+  // section re-lays out and our own x (or an ancestor's x/width) moves, so we
+  // watch those instead of polling. Each input below is a binding; its
+  // onXChanged handler fires whenever any value it reads changes.
+  //   - layoutKey: our x/width plus x/width of the first 3 ancestors (the
+  //     section Row may be nested). Joined as a string so distinct layouts
+  //     can't cancel out the way a numeric sum could.
+  //   - windowWidth: the bar window resizing moves the center line.
+  //   - reserve: centerReserve setting changed.
+  readonly property string layoutKey: {
+    var k = root.x + "," + root.width
+    var a = root.parent
+    for (var i = 0; i < 3 && a; i++) {
+      k += "|" + a.x + "," + a.width
+      a = a.parent
+    }
+    return k
+  }
+  readonly property real windowWidth: root.QsWindow.window ? root.QsWindow.window.width : 0
+  readonly property real reserve: Style.space(core.settings.centerReserve)
+
+  onLayoutKeyChanged: budgetTimer.restart()
+  onWindowWidthChanged: budgetTimer.restart()
+  onReserveChanged: budgetTimer.restart()
   onModeChanged: budgetTimer.restart()
   Timer { id: budgetTimer; interval: 100; onTriggered: root.recomputeBudget() }
-  // Neighbouring widgets can grow or shrink without telling us.
-  Timer { interval: 2000; repeat: true; running: root.mode === "lanes"; onTriggered: root.recomputeBudget() }
+  // Safety net only. The events above should cover normal cases, but layout
+  // changes in distant, non-ancestor items (or ones deeper than 3 levels up)
+  // could shift us without touching anything we watch, so keep a slow poll.
+  Timer { interval: 10000; repeat: true; running: root.mode === "lanes"; onTriggered: root.recomputeBudget() }
 
   // Only built in lanes mode: a hidden strip would still track every window.
   Loader {
