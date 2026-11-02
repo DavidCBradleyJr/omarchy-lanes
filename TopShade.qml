@@ -10,6 +10,8 @@ PanelWindow {
 
   property var settings: null
   property var hyprMonitor: null
+  // Shared WeatherService, injected by Taskbar.
+  property var weather: null
   property bool hoverOpen: false
   property bool heldOpen: false
   property int selectedTab: 0
@@ -117,7 +119,11 @@ PanelWindow {
 
   WlrLayershell.namespace: "omarchy-lanes-shade"
   WlrLayershell.layer: WlrLayer.Overlay
-  WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+  // OnDemand: the surface takes keyboard focus only when the user clicks into
+  // the open shade (so Esc can close it), never on hover, so a shade sliding
+  // out under the pointer cannot steal keys from the focused app. Closed, it
+  // asks for no focus at all.
+  WlrLayershell.keyboardFocus: root.opened ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
   // Keep the layer surface stationary. Moving the surface itself makes
   // compositors drop hover while it slides. The input mask grows with the
@@ -174,6 +180,11 @@ PanelWindow {
     color: root.shadeBackground
     border.width: Math.max(1, Style.space(1))
     border.color: root.shadeBorder
+
+    Item {
+      focus: true
+      Keys.onEscapePressed: root.closeShade()
+    }
 
     Item {
       id: technicalGrid
@@ -491,7 +502,7 @@ PanelWindow {
 
   Component {
     id: calendarComponent
-    ShadeCalendar { now: root.now; foreground: root.shadeText; accent: root.shadeAmber; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
+    ShadeCalendar { now: root.now; shown: root.opened; foreground: root.shadeText; accent: root.shadeAmber; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
   }
 
   Component {
@@ -506,6 +517,6 @@ PanelWindow {
 
   Component {
     id: weatherComponent
-    ShadeWeather { shown: root.opened; foreground: root.shadeText; accent: root.shadeCyan; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
+    ShadeWeather { weather: root.weather; shown: root.opened; foreground: root.shadeText; accent: root.shadeCyan; borderColor: root.shadeBorder; surfaceColor: root.shadeSurface }
   }
 }

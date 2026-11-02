@@ -10,6 +10,8 @@ Item {
   property color borderColor: Color.popups.border
   property color surfaceColor: Color.popups.background
   property date now: new Date()
+  // True while the shade is out; each open returns to the current month.
+  property bool shown: true
   property int viewYear: now.getFullYear()
   property int viewMonth: now.getMonth()
   readonly property int weekStart: Qt.locale().firstDayOfWeek
@@ -21,6 +23,8 @@ Item {
     viewYear = next.year
     viewMonth = next.month
   }
+
+  onShownChanged: if (shown) reset()
 
   function reset() {
     viewYear = now.getFullYear()

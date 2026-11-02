@@ -11,21 +11,24 @@ Item {
   property color accent: Color.accent
   property color borderColor: Color.popups.border
   property color surfaceColor: Color.popups.background
-  property string locationName: "Locating..."
-  property real latitude: NaN
-  property real longitude: NaN
-  property var report: null
-  property string radarHost: "https://tilecache.rainviewer.com"
-  property var radarFrames: []
-  property int radarFrameIndex: -1
+  // Shared data source (WeatherService); null renders the "Locating..." state.
+  property var weather: null
+  readonly property string locationName: weather ? weather.locationName : "Locating..."
+  readonly property real latitude: weather ? weather.latitude : NaN
+  readonly property real longitude: weather ? weather.longitude : NaN
+  readonly property var report: weather ? weather.report : null
+  readonly property string radarHost: weather ? weather.radarHost : "https://tilecache.rainviewer.com"
+  readonly property var radarFrames: weather ? weather.radarFrames : []
+  readonly property int refreshInterval: weather ? weather.refreshInterval : 15 * 60 * 1000
+  // Starts on the newest frame; the binding is replaced once stepped, and
+  // onRadarFramesChanged below re-seats it whenever a new index arrives.
+  property int radarFrameIndex: radarFrames.length - 1
   property bool radarPlaying: false
   property int radarZoom: 6
   property int radarSettledTiles: 0
   // False while the shade is put away: pause the radar loop and the
   // periodic refresh, then catch up on the next open if the data is stale.
   property bool shown: true
-  property real lastRefresh: 0
-  readonly property int refreshInterval: 15 * 60 * 1000
   readonly property bool hasCoordinates: isFinite(latitude) && isFinite(longitude)
   readonly property bool imperial: Qt.locale().measurementSystem === Locale.ImperialUSSystem
   readonly property var current: report && report.current ? report.current : null
@@ -56,35 +59,9 @@ Item {
     return out
   }
 
-  function loadConfiguredLocation(raw) {
-    try {
-      var data = JSON.parse(String(raw || "{}"))
-      var lat = parseFloat(data.latitude)
-      var lon = parseFloat(data.longitude)
-      if (isFinite(lat) && isFinite(lon)) {
-        locationName = String(data.name || "Local weather")
-        latitude = lat
-        longitude = lon
-        refresh()
-        return
-      }
-    } catch (e) {}
-    if (!locator.running) locator.running = true
-  }
-
-  function refresh() {
-    if (!hasCoordinates || forecast.running) return
-    var units = imperial
-      ? "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch"
-      : "&temperature_unit=celsius&wind_speed_unit=kmh&precipitation_unit=mm"
-    forecast.command = ["curl", "-fsS", "--max-time", "8",
-      "https://api.open-meteo.com/v1/forecast?latitude=" + encodeURIComponent(latitude)
-      + "&longitude=" + encodeURIComponent(longitude)
-      + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,is_day"
-      + "&daily=weather_code,temperature_2m_max,temperature_2m_min&forecast_days=5&timezone=auto" + units]
-    forecast.running = true
-    lastRefresh = Date.now()
-    if (!radarIndex.running) radarIndex.running = true
+  // Ask the shared service to fetch if its data is stale (first call starts it).
+  function wake() {
+    if (shown && weather) weather.refreshIfStale()
   }
 
   function setRadarZoom(value) {
@@ -97,66 +74,14 @@ Item {
     radarFrameIndex = (radarFrameIndex + delta + radarFrames.length) % radarFrames.length
   }
 
-  onShownChanged: if (shown && hasCoordinates && Date.now() - lastRefresh > refreshInterval) refresh()
+  onShownChanged: wake()
+  onWeatherChanged: wake()
+  Component.onCompleted: wake()
 
-  FileView {
-    id: locationFile
-    path: Quickshell.env("HOME") + "/.local/state/omarchy/settings/weather.json"
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.loadConfiguredLocation(text())
-    onLoadFailed: if (!locator.running) locator.running = true
-    onFileChanged: reload()
-  }
-
-  Process {
-    id: locator
-    command: ["curl", "-fsS", "--max-time", "8", "https://wttr.in/?format=j1"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try {
-          var parsed = JSON.parse(String(text || "{}"))
-          var area = parsed.nearest_area && parsed.nearest_area[0]
-          if (!area) return
-          root.latitude = parseFloat(area.latitude)
-          root.longitude = parseFloat(area.longitude)
-          root.locationName = area.areaName && area.areaName[0] ? area.areaName[0].value : "Local weather"
-          root.refresh()
-        } catch (e) {
-          root.locationName = "Weather unavailable"
-        }
-      }
-    }
-  }
-
-  Process {
-    id: forecast
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try { root.report = JSON.parse(String(text || "{}")) } catch (e) {}
-      }
-    }
-  }
-
-  Process {
-    id: radarIndex
-    command: ["curl", "-fsS", "--max-time", "8", "https://api.rainviewer.com/public/weather-maps.json"]
-    stdout: StdioCollector {
-      waitForEnd: true
-      onStreamFinished: {
-        try {
-          var data = JSON.parse(String(text || "{}"))
-          var frames = ShadeModel.radarFrames(data, 10)
-          if (frames.length === 0) return
-          root.radarHost = data.host || root.radarHost
-          root.radarFrames = frames
-          root.radarFrameIndex = frames.length - 1
-        } catch (e) {}
-      }
-    }
-  }
+  // New radar index fetched: jump to the newest frame. The tile Repeaters
+  // rebuild from radarFrames, and each old Image subtracts itself from
+  // radarSettledTiles on destruction, so the preload count starts over.
+  onRadarFramesChanged: radarFrameIndex = radarFrames.length - 1
 
   Timer {
     interval: 900
@@ -167,9 +92,9 @@ Item {
 
   Timer {
     interval: root.refreshInterval
-    running: root.shown
+    running: root.shown && root.weather !== null
     repeat: true
-    onTriggered: root.refresh()
+    onTriggered: root.wake()
   }
 
   Row {

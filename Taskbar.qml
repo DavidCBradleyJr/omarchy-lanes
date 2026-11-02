@@ -199,6 +199,10 @@ Item {
     }
   }
 
+  // One weather fetch shared by every monitor's shade. Idle until a shade
+  // first shows the weather tab.
+  WeatherService { id: weatherService }
+
   // One Android-style shade per output. It lives above the Omarchy bar and
   // leaves only a tiny top-edge trigger visible while closed.
   Variants {
@@ -209,6 +213,7 @@ Item {
         required property var modelData
         screen: modelData
         settings: root.settings
+        weather: weatherService
         hyprMonitor: Hyprland.monitorFor(modelData)
       }
     }
